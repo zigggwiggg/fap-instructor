@@ -31,6 +31,15 @@ interface VideoStore {
 const PREFETCH_THRESHOLD = 3  // fetch more when < 3 unwatched videos remain
 const BATCH_SIZE = 20
 
+// Rewrite CDN URLs through our Vercel Edge proxy so hotlink protection is bypassed
+function proxyMedia(url: string): string {
+    if (!url) return url
+    if (url.startsWith('https://media.redgifs.com/')) {
+        return `/api/media?url=${encodeURIComponent(url)}`
+    }
+    return url
+}
+
 export const useVideoStore = create<VideoStore>((set, get) => ({
     queue: [],
     currentIndex: 0,
@@ -111,7 +120,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
 
                 filtered.forEach(g => newItems.push({
                     id: g.id,
-                    url: g.urls.hd || g.urls.sd,
+                    url: proxyMedia(g.urls.hd || g.urls.sd),
                     thumbnail: g.urls.thumbnail || g.urls.poster,
                     duration: g.duration,
                     tags: g.tags || [],

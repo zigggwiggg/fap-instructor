@@ -1,6 +1,14 @@
 import type { RedGifsGif } from './redgifs'
 import { getToken } from './redgifs'
 
+function proxyMedia(url: string): string {
+    if (!url) return url
+    if (url.startsWith('https://media.redgifs.com/')) {
+        return `/api/media?url=${encodeURIComponent(url)}`
+    }
+    return url
+}
+
 export interface RedditVideoItem {
     id: string
     url: string
@@ -125,7 +133,7 @@ export async function fetchFromReddit(tag: string, count = 20): Promise<RedditVi
                     for (const g of gifs) {
                         results.push({
                             id: g.id,
-                            url: g.urls.hd || g.urls.sd,
+                            url: proxyMedia(g.urls.hd || g.urls.sd),
                             thumbnail: g.urls.thumbnail || g.urls.poster,
                             duration: g.duration,
                             tags: [...(g.tags || []), tag],
