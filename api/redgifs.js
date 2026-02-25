@@ -8,24 +8,30 @@ export default async function handler(req, res) {
         return res.status(200).end();
     }
 
-    const { path } = req.query;
-    const urlPath = Array.isArray(path) ? path.join('/') : path;
+    // Parse the full path, ignoring query param mappings and just taking from req.url
+    // Example: req.url = "/api/redgifs/v2/auth/temporary?foo=bar" or just "/?path=v2/auth/temporary" depending on Vercel rewrite
+    // If req.url starts with /api/redgifs/ we strip it. Otherwise if path was injected, we use that.
 
-    if (!urlPath) {
-        return res.status(400).json({ error: 'Missing path' });
-    }
+    let targetUrl = '';
 
-    // Ensure query parameters are forwarded
-    const queryToOmit = ['path'];
-    const qsParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(req.query)) {
-        if (!queryToOmit.includes(key)) {
-            qsParams.append(key, value);
+    if (req.url && req.url.startsWith('/api/redgifs')) {
+        const urlString = req.url.replace(/^\/api\/redgifs\/?/, '');
+        targetUrl = `https://api.redgifs.com/${urlString}`;
+    } else {
+        // Fallback if Vercel stripped it
+        const { path } = req.query;
+        const urlPath = Array.isArray(path) ? path.join('/') : path;
+
+        const queryToOmit = ['path'];
+        const qsParams = new URLSearchParams();
+        for (const [key, value] of Object.entries(req.query)) {
+            if (!queryToOmit.includes(key)) {
+                qsParams.append(key, value);
+            }
         }
+        const qs = qsParams.toString();
+        targetUrl = `https://api.redgifs.com/${urlPath}${qs ? '?' + qs : ''}`;
     }
-
-    const qs = qsParams.toString();
-    const targetUrl = `https://api.redgifs.com/${urlPath}${qs ? '?' + qs : ''}`;
 
     // Create headers that perfectly mimic a browser on redgifs.com
     const newHeaders = new Headers(req.headers);
