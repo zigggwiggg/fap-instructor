@@ -105,7 +105,14 @@ export default function GamePage() {
         if (!hasStarted) return
         const timer = setInterval(() => {
             if (!useVideoStore.getState().isPlaying) return  // don't tick while paused
-            setSessionTime((t) => t + 1)
+            setSessionTime((t) => {
+                const newTime = t + 1
+                // Progressively unlock more categories every 90 seconds
+                if (newTime % 90 === 0) {
+                    useVideoStore.getState().unlockMoreTags()
+                }
+                return newTime
+            })
         }, 1000)
         return () => clearInterval(timer)
     }, [hasStarted])

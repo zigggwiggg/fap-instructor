@@ -16,6 +16,8 @@ interface VideoStore {
     searchTags: string[]
     currentPage: number
     hasMore: boolean
+    shuffledTags: string[]
+    unlockedTagCount: number
 
     // ── Actions ──
     setTags: (tags: string[]) => void
@@ -25,6 +27,7 @@ interface VideoStore {
     pause: () => void
     resume: () => void
     markLoaded: (id: string) => void
+    unlockMoreTags: () => void
     reset: () => void
 }
 
@@ -49,25 +52,26 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
     searchTags: ['nsfw'],
     currentPage: 1,
     hasMore: true,
+    shuffledTags: [],
+    unlockedTagCount: 2,
 
     setTags: (tags) => {
         set({ searchTags: tags, queue: [], currentIndex: 0, currentPage: 1, hasMore: true })
     },
 
     fetchMore: async () => {
-        const { isLoading, hasMore, currentPage, queue } = get()
+        const { isLoading, hasMore, currentPage, queue, shuffledTags, unlockedTagCount } = get()
         if (isLoading || !hasMore) return
 
-        // Read dynamically from the persisted user config store
         const gameConfig = useConfigStore.getState().config
-        const queryTags = gameConfig.tags && gameConfig.tags.length > 0 ? gameConfig.tags : ['amateur', 'blowjob', 'cumshot']
         const order = gameConfig.searchOrder || 'trending'
 
         set({ isLoading: true, error: null })
 
         try {
-            // Pick a max of 4 random tags to prevent API rate limiting, allowing 2 per source
-            const tagsToFetch = [...queryTags].sort(() => 0.5 - Math.random()).slice(0, 4)
+            // Pick a max of 4 random tags from the CURRENTLY UNLOCKED pool (which grows over time)
+            const availableTags = shuffledTags.slice(0, unlockedTagCount)
+            const tagsToFetch = [...availableTags].sort(() => 0.5 - Math.random()).slice(0, 4)
 
             const { gifs, pictures } = gameConfig.mediaTypes
 
@@ -238,7 +242,19 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
         })
     },
 
+    unlockMoreTags: () => {
+        const { unlockedTagCount, shuffledTags } = get()
+        if (unlockedTagCount < shuffledTags.length) {
+            set({ unlockedTagCount: unlockedTagCount + 1 })
+            console.log(`[VideoStore] Unlocked new category! Now fetching from ${unlockedTagCount + 1} categories.`)
+        }
+    },
+
     reset: () => {
+        const gameConfig = useConfigStore.getState().config
+        const queryTags = gameConfig.tags && gameConfig.tags.length > 0 ? gameConfig.tags : ['amateur', 'blowjob', 'cumshot']
+        const shuffled = [...queryTags].sort(() => 0.5 - Math.random())
+
         set({
             queue: [],
             currentIndex: 0,
@@ -247,6 +263,8 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             error: null,
             currentPage: 1,
             hasMore: true,
+            shuffledTags: shuffled,
+            unlockedTagCount: 2,
         })
     },
 }))
