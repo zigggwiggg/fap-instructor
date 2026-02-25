@@ -84,7 +84,6 @@ export interface GameConfig {
     tags: string[]
     mediaTypes: { gifs: boolean; pictures: boolean; videos: boolean }
     slideDuration: number
-    searchOrder: 'trending' | 'top' | 'latest' | 'best'
 
     strokeSpeedMin: number
     strokeSpeedMax: number

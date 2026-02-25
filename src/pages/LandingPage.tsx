@@ -348,7 +348,7 @@ export default function LandingPage() {
                         </div>
                     </InputRow>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
                         <InputRow label="Media Type">
                             <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
                                 {(['gifs', 'pictures', 'videos'] as const).map((type) => (
@@ -363,19 +363,6 @@ export default function LandingPage() {
                                     </label>
                                 ))}
                             </div>
-                        </InputRow>
-
-                        <InputRow label="Search Order">
-                            <select
-                                value={config.searchOrder}
-                                onChange={(e) => updateConfig({ searchOrder: e.target.value as any })}
-                                style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', outline: 'none' }}
-                            >
-                                <option value="trending">Trending</option>
-                                <option value="top">Top (All Time)</option>
-                                <option value="latest">Latest</option>
-                                <option value="best">Best</option>
-                            </select>
                         </InputRow>
                     </div>
 
@@ -594,6 +581,14 @@ export default function LandingPage() {
                     >
                         START GAME
                     </button>
+
+                    {/* Version Badge */}
+                    <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: '4px' }}>
+                            v{/* @ts-expect-error injected by vite */}
+                            {__APP_VERSION__}
+                        </span>
+                    </div>
                 </div>
             </div>
         </div>

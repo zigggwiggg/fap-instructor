@@ -43,6 +43,29 @@ function proxyMedia(url: string): string {
     return url
 }
 
+// Map general tags to premium, high-quality subreddits and RedGifs specific niches/searches
+const CURATED_MAP: Record<string, { reddit: string[], redgifs: string[] }> = {
+    amateur: { reddit: ['Amateur', 'amateurcumsluts', 'RealGirls'], redgifs: ['amateur'] },
+    blowjob: { reddit: ['blowjobs', 'SuckingItDry', 'throatpies', 'DeepThroatTears'], redgifs: ['blowjob', 'deepthroat'] },
+    cumshot: { reddit: ['cumsluts', 'facial', 'cumshots', 'bodyshots'], redgifs: ['cumshot', 'facial', 'swallow'] },
+    titfuck: { reddit: ['titfuck', 'tittyfuck', 'Paizuri'], redgifs: ['titfuck', 'tittyfuck'] },
+    milf: { reddit: ['milf', 'MILFs', 'amateur_milfs'], redgifs: ['milf'] },
+    joi: { reddit: ['JerkOffInstruction', 'JOI_titillation', 'joi'], redgifs: ['joi'] },
+    teasing: { reddit: ['TeaseAndPlease', 'teasing', 'cocktease'], redgifs: ['tease', 'teasing'] },
+    handjob: { reddit: ['handjobs'], redgifs: ['handjob'] },
+    pussy: { reddit: ['pussy', 'godpussy', 'LegalTeens'], redgifs: ['pussy'] },
+    ass: { reddit: ['ass', 'paag', 'booty'], redgifs: ['ass', 'booty'] },
+    anal: { reddit: ['Anal', 'AnalGW', 'buttbound'], redgifs: ['anal'] },
+    hardcore: { reddit: ['HardcoreSex', 'RoughSex'], redgifs: ['hardcore', 'rough'] },
+    solo: { reddit: ['GettingHerselfOff', 'SoloMasturbation'], redgifs: ['solo', 'masturbation'] },
+    lesbian: { reddit: ['lesbians', 'dykesgonewild'], redgifs: ['lesbian'] },
+    threesome: { reddit: ['Threesome', 'groupsex'], redgifs: ['threesome'] },
+    pov: { reddit: ['POV', 'povnsfw'], redgifs: ['pov'] },
+    creampie: { reddit: ['creampies', 'Creampie'], redgifs: ['creampie'] },
+    hentai: { reddit: ['hentai', 'HENTAI_GIF'], redgifs: ['hentai'] },
+    toys: { reddit: ['dildos', 'suctiondildos', 'SexToys'], redgifs: ['dildo', 'toys'] }
+}
+
 export const useVideoStore = create<VideoStore>((set, get) => ({
     queue: [],
     currentIndex: 0,
@@ -64,7 +87,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
         if (isLoading || !hasMore) return
 
         const gameConfig = useConfigStore.getState().config
-        const order = gameConfig.searchOrder || 'trending'
+        const order = 'top' // Force 'top' for max quality instead of trending
 
         set({ isLoading: true, error: null })
 
@@ -86,12 +109,15 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
 
             async function tryRedgifs(tags: string[]) {
                 if (tags.length === 0) return
-                // Fetch from each niche endpoint sequentially to prevent 429 errors
-                const perNiche = Math.max(10, Math.floor(BATCH_SIZE / tags.length))
+                // Expand basic tags to curated high-quality paths
+                const expandedTags = tags.flatMap(t => CURATED_MAP[t]?.redgifs || [t])
+                // Deduplicate and hit max 3 to avoid rate limits
+                const uniqueTags = [...new Set(expandedTags)].slice(0, 3)
+                const perNiche = Math.max(10, Math.floor(BATCH_SIZE / uniqueTags.length))
                 const allResults: import('../services/redgifs').RedGifsGif[] = []
 
-                for (let i = 0; i < tags.length; i++) {
-                    const tag = tags[i]
+                for (let i = 0; i < uniqueTags.length; i++) {
+                    const tag = uniqueTags[i]
                     if (i > 0) {
                         // 500ms delay between consecutive sequential hits
                         await new Promise(res => setTimeout(res, 500))
@@ -104,18 +130,23 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                     }
                 }
 
-                if (allResults.length === 0 && tags.length > 0) {
+                if (allResults.length === 0 && uniqueTags.length > 0) {
                     console.warn(`[VideoStore] All niches failed or empty. Falling back to unified search.`)
                     try {
-                        const r = await searchGifs(tags, currentPage, BATCH_SIZE, order)
+                        const r = await searchGifs(uniqueTags, currentPage, BATCH_SIZE, order)
                         if (r && r.gifs) allResults.push(...r.gifs)
                     } catch (err) {
                         console.warn(`[VideoStore] Unified search fallback also failed:`, err)
                     }
                 }
 
-                // Filter & Format
+                // Filter & Format for Extreme Quality
                 const filtered = allResults.filter((g) => {
+                    // Strict Quality Filters
+                    if (g.duration && g.duration < 4) return false // No micro-loops
+                    if (g.views && g.views < 100) return false // Must have some traction
+                    if (!g.urls.hd) return false // Must have HD source
+
                     if (gifs && pictures) return true          // show all
                     if (gifs && !pictures) return g.type === 1 // gifs/videos only
                     if (!gifs && pictures) return g.type === 2 // images only
@@ -145,9 +176,14 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             async function tryReddit(tags: string[]) {
                 if (tags.length === 0) return
                 let redditQueue: VideoItem[] = []
-                for (const tag of tags) {
+
+                // Map basic tags to premium subreddits
+                const expandedTags = tags.flatMap(t => CURATED_MAP[t]?.reddit || [t])
+                const uniqueTags = [...new Set(expandedTags)].slice(0, 3)
+
+                for (const tag of uniqueTags) {
                     try {
-                        const results = await fetchFromReddit(tag, Math.max(5, Math.floor(BATCH_SIZE / tags.length)))
+                        const results = await fetchFromReddit(tag, Math.max(5, Math.floor(BATCH_SIZE / uniqueTags.length)))
                         // format
                         results.forEach(r => redditQueue.push({
                             id: r.id,

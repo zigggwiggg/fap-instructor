@@ -9,7 +9,6 @@ export const DEFAULT_CONFIG: GameConfig = {
     tags: ['amateur', 'blowjob', 'cumshot'],
     mediaTypes: { gifs: true, pictures: true, videos: true },
     slideDuration: 10,
-    searchOrder: 'trending',
 
     strokeSpeedMin: 0.25,
     strokeSpeedMax: 4,
