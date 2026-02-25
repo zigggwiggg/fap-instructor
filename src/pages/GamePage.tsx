@@ -60,7 +60,7 @@ export default function GamePage() {
     const { config } = useConfigStore()
     const { strokeSpeed, phase, edges, ruins, notification, triggerEdge, triggerRuin, setStrokeSpeed, pauseStrokes, resumeStrokes, reset: resetStrokes } = useStrokeStore()
     const [sessionTime, setSessionTime] = useState(0)
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false)
     const [hasStarted, setHasStarted] = useState(false)
     const [volume, setVolume] = useState(0.8)
     const [beatStyle, setBeatStyle] = useState<BeatStyle>('dot')
@@ -229,6 +229,7 @@ export default function GamePage() {
                 }}>
                     <button className="btn-glow animate-pulse-glow" onClick={() => {
                         setHasStarted(true)
+                        setIsSidebarOpen(false) // Auto-close sidebar for a clean view
                         resume()
                         // Call play() directly here — inside the user gesture context —
                         // to bypass browser autoplay restrictions on all platforms
@@ -428,14 +429,19 @@ export default function GamePage() {
                 )}
             </div>
 
-            {/* Top Right Area: Task Display */}
+            {/* Top Right Area: Task Display — 50% opacity when waiting, full when active */}
             <div style={{
-                position: 'absolute', top: '24px', right: '24px',
-                zIndex: 10, pointerEvents: 'none', width: '200px', display: 'flex', justifyContent: 'flex-end'
-            }}>
-                <div style={{ pointerEvents: 'auto', width: '100%' }}>
-                    <TaskDisplay />
-                </div>
+                position: 'absolute', top: '16px', right: '16px',
+                zIndex: 10, width: '180px',
+                opacity: 0.5,
+                transition: 'opacity 0.3s ease',
+            }}
+                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={e => (e.currentTarget.style.opacity = '0.5')}
+                onTouchStart={e => (e.currentTarget.style.opacity = '1')}
+                onTouchEnd={e => setTimeout(() => (e.currentTarget.style.opacity = '0.5'), 2000)}
+            >
+                <TaskDisplay />
             </div>
 
             {/* Stroke notification overlay */}

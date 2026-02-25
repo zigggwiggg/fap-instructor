@@ -4,7 +4,7 @@ import { useTaskStore } from '../stores/taskStore'
 import { useEffect, useState } from 'react'
 
 export default function TaskDisplay() {
-    const { currentAction, isExecuting, skipCurrent, completeAction } = useTaskStore()
+    const { currentAction, isExecuting, completeAction } = useTaskStore()
     const [timeLeft, setTimeLeft] = useState(0)
     const [isVisible, setIsVisible] = useState(false)
 
@@ -40,17 +40,7 @@ export default function TaskDisplay() {
     }, [currentAction, isExecuting, completeAction])
 
     if (!currentAction) {
-        return (
-            <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
-                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>
-                    Waiting for next task...
-                </p>
-                <div
-                    className="skeleton"
-                    style={{ height: '20px', width: '60%', margin: '1rem auto 0' }}
-                />
-            </div>
-        )
+        return null
     }
 
     return (
@@ -130,40 +120,6 @@ export default function TaskDisplay() {
                 {currentAction.description}
             </p>
 
-            {/* ── Action Buttons ── */}
-            <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                    className="btn-glow"
-                    onClick={() => completeAction({ completed: true, skipped: false, duration: 30 - timeLeft })}
-                    style={{ flex: 1, padding: '6px 10px', fontSize: '0.75rem' }}
-                >
-                    Done ✓
-                </button>
-                <button
-                    onClick={skipCurrent}
-                    style={{
-                        flex: 0,
-                        padding: '6px 10px',
-                        fontSize: '0.75rem',
-                        background: 'rgba(255,255,255,0.05)',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius-md)',
-                        color: 'var(--color-text-muted)',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                    }}
-                    onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = 'var(--color-danger)'
-                        e.currentTarget.style.color = 'var(--color-danger)'
-                    }}
-                    onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = 'var(--color-border)'
-                        e.currentTarget.style.color = 'var(--color-text-muted)'
-                    }}
-                >
-                    Skip
-                </button>
-            </div>
         </div>
     )
 }
