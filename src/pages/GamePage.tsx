@@ -8,6 +8,7 @@ import VideoPlayer from '../components/VideoPlayer'
 import TaskDisplay from '../components/TaskDisplay'
 import BeatMeter, { type BeatStyle } from '../components/BeatMeter'
 import type { Action } from '../types'
+import { triggerVideoPlay } from '../videoControl'
 
 const DEMO_ACTIONS: Action[] = [
     {
@@ -222,6 +223,9 @@ export default function GamePage() {
                     <button className="btn-glow animate-pulse-glow" onClick={() => {
                         setHasStarted(true)
                         resume()
+                        // Call play() directly here — inside the user gesture context —
+                        // to bypass browser autoplay restrictions on all platforms
+                        triggerVideoPlay?.()
 
                         // GENERATE GAME PLAN
                         const durationMins = config.gameDurationMin + (Math.random() * (config.gameDurationMax - config.gameDurationMin))

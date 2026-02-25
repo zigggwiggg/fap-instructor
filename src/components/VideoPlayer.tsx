@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useVideoStore } from '../stores/videoStore'
 import { useConfigStore } from '../stores/configStore'
+import { registerVideoPlay } from '../videoControl'
 
 export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: boolean; volume?: number }) {
     const {
@@ -43,10 +44,21 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         vid.volume = muted ? 0 : volume
         const p = vid.play()
         if (p) p.catch(() => {
-            // Retry once after a short delay (handles mobile browser timing quirks)
-            setTimeout(() => vid.play().catch(() => { }), 200)
+            // Retry once muted (autoplay policy fallback)
+            vid.muted = true
+            vid.play().catch(() => { })
         })
     }, [muted, volume])
+
+    // Register a module-level trigger so GamePage can call play() directly
+    // from within the user's click handler (bypasses autoplay restrictions)
+    const activeSlotRef = useRef(activeSlot)
+    activeSlotRef.current = activeSlot
+    useEffect(() => {
+        registerVideoPlay(() => {
+            tryPlay(videoRefs.current[activeSlotRef.current])
+        })
+    }, [tryPlay])
 
     // ── Auto-play current slot when it changes ──
     useEffect(() => {
