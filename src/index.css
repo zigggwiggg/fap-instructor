@@ -38,7 +38,9 @@
 }
 
 /* ── Reset & Base ── */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -68,13 +70,16 @@ body {
 ::-webkit-scrollbar {
   width: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background: var(--color-text-muted);
   border-radius: var(--radius-full);
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-secondary);
 }
@@ -101,10 +106,12 @@ body {
   position: relative;
   overflow: hidden;
 }
+
 .btn-glow:hover {
   transform: translateY(-2px);
   box-shadow: 0 0 50px var(--color-accent-glow), var(--shadow-glow);
 }
+
 .btn-glow:active {
   transform: translateY(0);
 }
@@ -125,6 +132,7 @@ body {
   padding: 24px;
   transition: all 0.3s ease;
 }
+
 .card:hover {
   background: var(--color-bg-card-hover);
   border-color: var(--color-border-active);
@@ -133,18 +141,34 @@ body {
 
 /* ── Pulse animation ── */
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 20px var(--color-accent-glow); }
-  50% { box-shadow: 0 0 40px var(--color-accent-glow), 0 0 80px rgba(139, 92, 246, 0.1); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 20px var(--color-accent-glow);
+  }
+
+  50% {
+    box-shadow: 0 0 40px var(--color-accent-glow), 0 0 80px rgba(139, 92, 246, 0.1);
+  }
 }
+
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
 /* ── Fade In ── */
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
 .animate-fade-in {
   animation: fade-in 0.5s ease-out forwards;
 }
@@ -159,6 +183,7 @@ body {
   overflow: hidden;
   box-shadow: var(--shadow-elevated);
 }
+
 .video-stage video {
   position: absolute;
   inset: 0;
@@ -169,12 +194,29 @@ body {
 
 /* ── Skeleton loader ── */
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }
+
 .skeleton {
   background: linear-gradient(90deg, var(--color-bg-card) 25%, var(--color-bg-card-hover) 50%, var(--color-bg-card) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: var(--radius-md);
+}
+
+/* ── Spin animation (used by loading spinners) ── */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }

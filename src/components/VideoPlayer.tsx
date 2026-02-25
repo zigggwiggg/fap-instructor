@@ -36,6 +36,18 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         }, 50)
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Helper: attempt to play a specific video element
+    const tryPlay = useCallback((vid: HTMLVideoElement | null) => {
+        if (!vid) return
+        vid.muted = muted
+        vid.volume = muted ? 0 : volume
+        const p = vid.play()
+        if (p) p.catch(() => {
+            // Retry once after a short delay (handles mobile browser timing quirks)
+            setTimeout(() => vid.play().catch(() => { }), 200)
+        })
+    }, [muted, volume])
+
     // ── Auto-play current slot when it changes ──
     useEffect(() => {
         videoRefs.current.forEach((vid, idx) => {
@@ -43,25 +55,24 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
             if (idx === activeSlot) {
                 vid.muted = muted
                 vid.volume = muted ? 0 : volume
-                if (isPlaying) vid.play().catch(() => { })
+                if (isPlaying) tryPlay(vid)
             } else {
                 vid.muted = true
+                vid.pause()
             }
         })
-    }, [currentIndex, activeSlot, isPlaying, muted, volume])
+    }, [currentIndex, activeSlot, isPlaying, muted, volume, tryPlay])
 
     // Sync play/pause state globally
     useEffect(() => {
         const currentVideo = videoRefs.current[activeSlot]
         if (!currentVideo) return
         if (isPlaying) {
-            currentVideo.muted = muted
-            currentVideo.volume = muted ? 0 : volume
-            currentVideo.play().catch(() => { })
+            tryPlay(currentVideo)
         } else {
             currentVideo.pause()
         }
-    }, [isPlaying, activeSlot, muted])
+    }, [isPlaying, activeSlot, muted, tryPlay])
 
     // ── Slide Duration Timer → auto-advance after configured seconds ──
     useEffect(() => {
@@ -94,10 +105,15 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
 
     // ── Handle preload complete ──
     const handleCanPlay = useCallback(
-        (id: string) => {
+        (id: string, slotIndex: number) => {
             markLoaded(id)
+            // If this is the active slot and we should be playing, play now.
+            // This is crucial for mobile where play() must be called when media is ready.
+            if (slotIndex === activeSlot && useVideoStore.getState().isPlaying) {
+                tryPlay(videoRefs.current[slotIndex])
+            }
         },
-        [markLoaded]
+        [markLoaded, activeSlot, tryPlay]
     )
 
     if (error) {
@@ -111,7 +127,7 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
     if (isLoading && queue.length === 0) {
         return (
             <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black' }}>
-                <div className="inline-block w-8 h-8 border-2 border-t-[var(--color-accent)] border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin" />
+                <div style={{ width: '2rem', height: '2rem', border: '2px solid var(--color-accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
             </div>
         )
     }
@@ -126,14 +142,24 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
                         key={`${video.id}-${slotIndex}`}
                         ref={(el) => {
                             videoRefs.current[slotIndex] = el
+                            // When the element first mounts and we're already playing, try to play immediately
+                            if (el && isCurrent && useVideoStore.getState().isPlaying) {
+                                tryPlay(el)
+                            }
                         }}
                         src={video.url}
                         preload="auto"
                         loop={false}
-                        muted={!isCurrent}
+                        muted={!isCurrent || muted}
                         playsInline
                         onEnded={isCurrent ? handleEnded : undefined}
-                        onCanPlay={() => handleCanPlay(video.id)}
+                        onCanPlay={() => handleCanPlay(video.id, slotIndex)}
+                        onLoadedData={() => {
+                            // Second attempt trigger on mobile when data is fully available
+                            if (slotIndex === activeSlot && useVideoStore.getState().isPlaying) {
+                                tryPlay(videoRefs.current[slotIndex])
+                            }
+                        }}
                         style={{
                             position: 'absolute',
                             top: 0,
