@@ -126,8 +126,24 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
 
     if (isLoading && queue.length === 0) {
         return (
-            <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black' }}>
+            <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black', gap: '12px' }}>
                 <div style={{ width: '2rem', height: '2rem', border: '2px solid var(--color-accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem' }}>Loading videos...</p>
+            </div>
+        )
+    }
+
+    if (!isLoading && queue.length === 0) {
+        return (
+            <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black', gap: '16px' }}>
+                <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '1rem' }}>⚠️ No videos found</p>
+                <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', textAlign: 'center', maxWidth: '260px' }}>Try selecting different categories on the home screen, or check your internet connection.</p>
+                <button
+                    onClick={() => useVideoStore.getState().fetchMore()}
+                    style={{ marginTop: '8px', padding: '8px 24px', background: 'rgba(139, 92, 246, 0.3)', border: '1px solid rgba(139, 92, 246, 0.5)', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '0.85rem' }}
+                >
+                    Retry
+                </button>
             </div>
         )
     }

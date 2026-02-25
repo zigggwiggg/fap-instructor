@@ -51,7 +51,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
 
         // Read dynamically from the persisted user config store
         const gameConfig = useConfigStore.getState().config
-        const queryTags = gameConfig.tags && gameConfig.tags.length > 0 ? gameConfig.tags : ['nsfw']
+        const queryTags = gameConfig.tags && gameConfig.tags.length > 0 ? gameConfig.tags : ['amateur', 'blowjob', 'cumshot']
         const order = gameConfig.searchOrder || 'trending'
 
         set({ isLoading: true, error: null })
@@ -172,8 +172,13 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             }
 
             if (newItems.length === 0) {
-                // Return to try again later instead of permanently disabling fetching
+                console.warn('[VideoStore] No items fetched. Will retry in 2s...')
                 set({ isLoading: false })
+                // Retry after a short delay so the player doesn't stay black forever
+                setTimeout(() => {
+                    const s = useVideoStore.getState()
+                    if (s.queue.length === 0 && !s.isLoading) s.fetchMore()
+                }, 2000)
                 return
             }
 

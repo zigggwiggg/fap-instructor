@@ -6,7 +6,7 @@ export const DEFAULT_CONFIG: GameConfig = {
     gameDurationMin: 5,
     gameDurationMax: 15,
 
-    tags: [],
+    tags: ['amateur', 'blowjob', 'cumshot'],
     mediaTypes: { gifs: true, pictures: true, videos: true },
     slideDuration: 10,
     searchOrder: 'trending',
