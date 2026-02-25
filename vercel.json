@@ -1,11 +1,7 @@
 {
   "rewrites": [
     {
-      "source": "/api/redgifs/:match*",
-      "destination": "https://api.redgifs.com/:match*"
-    },
-    {
-      "source": "/(.*)",
+      "source": "/((?!api/.*).*)",
       "destination": "/index.html"
     }
   ]
