@@ -1,0 +1,12 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/redgifs/:match*",
+      "destination": "https://api.redgifs.com/:match*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

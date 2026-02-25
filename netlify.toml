@@ -1,0 +1,10 @@
+[[redirects]]
+  from = "/api/redgifs/*"
+  to = "https://api.redgifs.com/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
