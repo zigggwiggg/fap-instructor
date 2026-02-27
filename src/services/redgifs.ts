@@ -167,9 +167,9 @@ export async function fetchByNiche(
             // Attempt a more generic search fallback to bypass niche-specific rate limits
             return searchGifs([nicheName], page, count, order)
         }
-        // If niche not found, fall back to search
-        if (res.status === 404) {
-            console.warn(`[RedGifs] Niche "${nicheName}" not found, falling back to search`)
+        // If niche not found or moved, fall back to search
+        if (res.status === 404 || res.status === 301 || res.status === 308 || res.status === 403) {
+            console.warn(`[RedGifs] Niche "${nicheName}" returned ${res.status}, falling back to search`)
             return searchGifs([nicheName], page, count, order)
         }
         throw new Error(`RedGifs niche fetch failed: ${res.status}`)

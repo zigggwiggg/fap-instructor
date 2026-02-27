@@ -2,23 +2,8 @@
 
 import { create } from 'zustand'
 import { useConfigStore } from './configStore'
+import { audioEngine } from '../audioEngine'
 
-// ── Tick Audio (Web Audio API for precise timing) ──
-let audioCtx: AudioContext | null = null
-
-function playTick(volume = 0.3) {
-    if (!audioCtx) audioCtx = new AudioContext()
-    const osc = audioCtx.createOscillator()
-    const gain = audioCtx.createGain()
-    osc.type = 'sine'
-    osc.frequency.value = 800
-    gain.gain.setValueAtTime(volume, audioCtx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.08)
-    osc.connect(gain)
-    gain.connect(audioCtx.destination)
-    osc.start()
-    osc.stop(audioCtx.currentTime + 0.08)
-}
 
 // ── Types ──
 export type StrokePhase = 'idle' | 'stroking' | 'edge_buildup' | 'riding_edge' | 'edge_cooldown' | 'ruin_buildup' | 'ruined' | 'ruin_cooldown' | 'orgasm'
@@ -47,6 +32,7 @@ interface StrokeStore {
     pauseStrokes: () => void
     resumeStrokes: () => void
     reset: () => void
+    setOrgasm: () => void
 }
 
 // ── Helpers ──
@@ -83,8 +69,11 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
         const config = useConfigStore.getState().config
         if (speed <= 0) {
             set({ strokeSpeed: 0 })
+            audioEngine.updateIntensity(0) // Stop audio when speed is 0
         } else {
-            set({ strokeSpeed: clamp(speed, config.strokeSpeedMin, config.strokeSpeedMax) })
+            const clamped = clamp(speed, config.strokeSpeedMin, config.strokeSpeedMax)
+            set({ strokeSpeed: clamped })
+            audioEngine.updateIntensity(clamped)
         }
     },
 
@@ -108,7 +97,9 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
 
         if (newBeatTime >= interval) {
             // BEAT!
-            playTick()
+            audioEngine.playTick()
+
+
             set((state) => ({
                 totalStrokes: state.totalStrokes + 1,
                 lastBeatTime: 0,
@@ -126,6 +117,8 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
 
         // Phase 1: Build up - go fast
         set({ phase: 'edge_buildup', notification: '🔥 Get to the edge!' })
+        audioEngine.playVoice('edge_buildup')
+        audioEngine.setCategoryVolume('voice', 1)
         setStrokeSpeed(config.strokeSpeedMax)
 
         // Wait for user to reach edge (auto after 8-15s)
@@ -133,6 +126,8 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
 
         // Phase 2: Ride the edge
         set({ phase: 'riding_edge', notification: '⚡ Ride the edge... don\'t cum!' })
+        audioEngine.playVoice('edge_ride')
+        audioEngine.setCategoryVolume('voice', 1)
         setStrokeSpeed(config.strokeSpeedMax * 0.3)  // Slow down to edge speed
 
         const rideTime = getRandomInt(5, 25) * 1000
@@ -144,6 +139,8 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
             phase: 'edge_cooldown',
             notification: '✋ Let go! Hands off.',
         }))
+        audioEngine.playVoice('edge_cooldown')
+        audioEngine.setCategoryVolume('voice', 1)
         setStrokeSpeed(0)
 
         await delay(config.edgeCooldown * 1000)
@@ -152,6 +149,7 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
         const newSpeed = randSpeed()
         setStrokeSpeed(newSpeed)
         set({ phase: 'stroking', notification: '👊 Start stroking again' })
+        audioEngine.setCategoryVolume('voice', 0.5) // Lower voice volume for general stroking
 
         await delay(3000)
         set({ notification: null })
@@ -164,6 +162,8 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
 
         // Phase 1: Go max speed
         set({ phase: 'ruin_buildup', notification: '💀 Ruin it for me!' })
+        audioEngine.playVoice('ruin_buildup')
+        audioEngine.setCategoryVolume('voice', 1)
         setStrokeSpeed(config.strokeSpeedMax)
 
         // Wait for user to get close
@@ -175,6 +175,8 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
             phase: 'ruined',
             notification: '😈 RUINED! Let go NOW!',
         }))
+        audioEngine.playVoice('ruin_moment')
+        audioEngine.setCategoryVolume('voice', 1)
         setStrokeSpeed(0)
 
         // Cooldown
@@ -184,6 +186,7 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
         set({ phase: 'ruin_cooldown', notification: '👊 Start stroking again' })
         const newSpeed = randSpeed()
         setStrokeSpeed(newSpeed)
+        audioEngine.setCategoryVolume('voice', 0.5) // Lower voice volume for general stroking
 
         await delay(3000)
         set({ phase: 'stroking', notification: null })
@@ -207,4 +210,13 @@ export const useStrokeStore = create<StrokeStore>((set, get) => ({
             notification: null,
             lastBeatTime: 0,
         }),
+    setOrgasm: () => {
+        set((state) => ({
+            phase: 'orgasm',
+            orgasms: state.orgasms + 1,
+        }))
+        audioEngine.playVoice('orgasm')
+        audioEngine.setCategoryVolume('voice', 1)
+        audioEngine.updateIntensity(0) // Stop stroking audio
+    }
 }))

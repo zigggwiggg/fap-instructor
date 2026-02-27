@@ -9,6 +9,10 @@ import TaskDisplay from '../components/TaskDisplay'
 import BeatMeter, { type BeatStyle } from '../components/BeatMeter'
 import type { Action } from '../types'
 import { triggerVideoPlay } from '../videoControl'
+import { audioEngine } from '../audioEngine'
+import { useAudioStore } from '../stores/audioStore'
+
+
 
 const DEMO_ACTIONS: Action[] = [
     {
@@ -59,16 +63,19 @@ export default function GamePage() {
     const { isPlaying, resume, pause, advance, goBack } = useVideoStore()
     const { config } = useConfigStore()
     const { strokeSpeed, phase, edges, ruins, notification, triggerEdge, triggerRuin, setStrokeSpeed, pauseStrokes, resumeStrokes, reset: resetStrokes } = useStrokeStore()
+
     const [sessionTime, setSessionTime] = useState(0)
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
     const [hasStarted, setHasStarted] = useState(false)
-    const [volume, setVolume] = useState(0.8)
     const [beatStyle, setBeatStyle] = useState<BeatStyle>('dot')
+    const {
+        masterVolume, setMasterVolume,
+        moansEnabled, toggleMoans,
+        voiceEnabled, toggleVoice,
+        metronomeEnabled, toggleMetronome
+    } = useAudioStore()
+    const [toggles, setToggles] = useState({ beatMeter: true, muteVideos: false })
 
-    // Local toggles UI state
-    const [toggles, setToggles] = useState({
-        voice: true, moans: true, muteVideos: false, metronome: true, beatMeter: true
-    })
 
     const [gamePlan, setGamePlan] = useState<{
         durationSeconds: number;
@@ -90,6 +97,8 @@ export default function GamePage() {
     const durationToUse = gamePlan ? (gamePlan.durationSeconds + gamePlan.taperDuration) : config.gameDurationMin * 60
     const gameTimeRemaining = Math.max(0, Math.floor(durationToUse - sessionTime))
 
+    const currentAction = useTaskStore(s => s.currentAction)
+
     useEffect(() => {
         registerActions(DEMO_ACTIONS)
         start()
@@ -97,8 +106,23 @@ export default function GamePage() {
             stop()
             useVideoStore.getState().reset()
             resetStrokes()
+            if (window.speechSynthesis) window.speechSynthesis.cancel()
         }
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Voice & JOI bindings
+    useEffect(() => {
+        if (!hasStarted || !voiceEnabled || !notification) return
+        audioEngine.playVoice('command') // Using generic command for notifications
+    }, [notification, hasStarted, voiceEnabled])
+
+    useEffect(() => {
+        if (!hasStarted || !voiceEnabled || !currentAction) return
+        audioEngine.playVoice('command')
+    }, [currentAction, hasStarted, voiceEnabled])
+
+    // Redundant moan audio loop removed as audioEngine handles its own loop based on strokeSpeed
+
 
     // Session timer (pauses when game is paused)
     useEffect(() => {
@@ -217,7 +241,7 @@ export default function GamePage() {
             position: 'fixed', inset: 0, backgroundColor: 'black', overflow: 'hidden', fontFamily: 'sans-serif'
         }}>
             {/* The Background Video Layer */}
-            <VideoPlayer muted={toggles.muteVideos} volume={volume} />
+            <VideoPlayer muted={toggles.muteVideos} volume={masterVolume} />
 
             {/* Blurred overlay until user clicks PLAY */}
             {!hasStarted && (
@@ -229,11 +253,18 @@ export default function GamePage() {
                 }}>
                     <button className="btn-glow animate-pulse-glow" onClick={() => {
                         setHasStarted(true)
-                        setIsSidebarOpen(false) // Auto-close sidebar for a clean view
+                        setIsSidebarOpen(false)
                         resume()
-                        // Call play() directly here — inside the user gesture context —
-                        // to bypass browser autoplay restrictions on all platforms
+
+                        audioEngine.initialize().then(() => {
+                            // Intro Sequence
+                            audioEngine.playVoice('intro')
+                            setTimeout(() => audioEngine.playVoice('setup'), 5000)
+                            setTimeout(() => audioEngine.playVoice('rules'), 12000)
+                        })
+
                         triggerVideoPlay?.()
+
 
                         // GENERATE GAME PLAN
                         const durationMins = config.gameDurationMin + (Math.random() * (config.gameDurationMax - config.gameDurationMin))
@@ -322,34 +353,36 @@ export default function GamePage() {
 
                         {/* Toggles Row 1 */}
                         <div style={{ display: 'flex', gap: '24px', marginTop: '8px' }}>
-                            <CustomToggle label="Voice" checked={toggles.voice} onChange={(v) => setToggles({ ...toggles, voice: v })} />
-                            <CustomToggle label="Moans" checked={toggles.moans} onChange={(v) => setToggles({ ...toggles, moans: v })} />
+                            <CustomToggle label="Voice" checked={voiceEnabled} onChange={toggleVoice} />
+                            <CustomToggle label="Moans" checked={moansEnabled} onChange={toggleMoans} />
                             <CustomToggle label="Mute Videos" checked={toggles.muteVideos} onChange={(v) => setToggles({ ...toggles, muteVideos: v })} />
                         </div>
 
+
                         {/* Volume Slider */}
-                        {!toggles.muteVideos && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', paddingLeft: '2px' }}>
-                                <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>🔈</span>
-                                <input
-                                    type="range"
-                                    min="0" max="1" step="0.05"
-                                    value={volume}
-                                    onChange={(e) => setVolume(parseFloat(e.target.value))}
-                                    style={{
-                                        width: '100px', height: '4px', cursor: 'pointer',
-                                        accentColor: 'var(--color-accent-secondary)',
-                                    }}
-                                />
-                                <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>🔊</span>
-                            </div>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', paddingLeft: '2px' }}>
+                            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>🔈</span>
+                            <input
+                                type="range"
+                                min="0" max="1" step="0.05"
+                                value={masterVolume}
+                                onChange={(e) => setMasterVolume(parseFloat(e.target.value))}
+                                style={{
+                                    width: '100px', height: '4px', cursor: 'pointer',
+                                    accentColor: 'var(--color-accent-secondary)',
+                                }}
+                            />
+                            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>🔊</span>
+                        </div>
+
 
                         {/* Toggles Row 2 */}
                         <div style={{ display: 'flex', gap: '24px' }}>
-                            <CustomToggle label="Metronome" checked={toggles.metronome} onChange={(v) => setToggles({ ...toggles, metronome: v })} />
+                            <CustomToggle label="Metronome" checked={metronomeEnabled} onChange={toggleMetronome} />
                             <CustomToggle label="Beat Meter" checked={toggles.beatMeter} onChange={(v) => setToggles({ ...toggles, beatMeter: v })} />
                         </div>
+
+
 
                         {/* Beat Style Picker */}
                         {toggles.beatMeter && (
@@ -436,10 +469,13 @@ export default function GamePage() {
                 opacity: 0.5,
                 transition: 'opacity 0.3s ease',
             }}
-                onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-                onMouseLeave={e => (e.currentTarget.style.opacity = '0.5')}
-                onTouchStart={e => (e.currentTarget.style.opacity = '1')}
-                onTouchEnd={e => setTimeout(() => (e.currentTarget.style.opacity = '0.5'), 2000)}
+                onMouseEnter={e => { if (e.currentTarget) e.currentTarget.style.opacity = '1' }}
+                onMouseLeave={e => { if (e.currentTarget) e.currentTarget.style.opacity = '0.5' }}
+                onTouchStart={e => { if (e.currentTarget) e.currentTarget.style.opacity = '1' }}
+                onTouchEnd={e => {
+                    const target = e.currentTarget;
+                    setTimeout(() => { if (target) target.style.opacity = '0.5' }, 2000)
+                }}
             >
                 <TaskDisplay />
             </div>
@@ -477,7 +513,8 @@ export default function GamePage() {
             )}
 
             {/* Beat Meter */}
-            <BeatMeter enabled={toggles.beatMeter && hasStarted} metronomeEnabled={toggles.metronome && hasStarted} style={beatStyle} />
+            <BeatMeter enabled={hasStarted} metronomeEnabled={metronomeEnabled && hasStarted} style={beatStyle} />
+
         </div>
     )
 }

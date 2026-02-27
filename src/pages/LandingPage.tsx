@@ -199,6 +199,18 @@ export default function LandingPage() {
                 {/* ── Configuration Form ── */}
                 <div className="glass card" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.03)', padding: '12px 16px', borderRadius: 'var(--radius-md) ' }}>
+                        <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                            Playing as: <span style={{ color: 'white', fontWeight: 600, textTransform: 'capitalize' }}>{config.orientation} {config.gender}</span>
+                        </div>
+                        <button
+                            onClick={() => updateConfig({ ageVerified: false, gender: null, orientation: null })}
+                            style={{ background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
+                        >
+                            Change Identity
+                        </button>
+                    </div>
+
                     {/* 1. Game Duration */}
                     <SectionHeader title="Game Duration" />
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>

@@ -81,6 +81,11 @@ export interface GameConfig {
     gameDurationMin: number
     gameDurationMax: number
 
+    // User Identity & Filtering
+    gender: 'male' | 'female' | 'non-binary' | 'other' | null
+    orientation: 'straight' | 'gay' | 'bisexual' | 'lesbian' | null
+    ageVerified: boolean
+
     tags: string[]
     mediaTypes: { gifs: boolean; pictures: boolean; videos: boolean }
     slideDuration: number

@@ -15,17 +15,16 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
     } = useVideoStore()
     const { config } = useConfigStore()
 
-    const videoRefs = useRef<(HTMLVideoElement | null)[]>([null, null, null])
-    const [activeSlot, setActiveSlot] = useState(0)
     const [transitioning, setTransitioning] = useState(false)
     const slideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     // The 3 videos we want mounted at any time
-    const slots = [
-        queue[currentIndex],
-        queue[currentIndex + 1],
-        queue[currentIndex + 2],
-    ]
+    const currentVideo = queue[currentIndex]
+    const nextVideo = queue[currentIndex + 1]
+    const nextNextVideo = queue[currentIndex + 2]
+
+    // We filter nulls, but React keys keep the elements perfectly alive as they shift positions!
+    const slots = [currentVideo, nextVideo, nextNextVideo].filter(Boolean)
 
     // ── Always reset and fetch fresh on mount ──
     useEffect(() => {
@@ -37,54 +36,68 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         }, 50)
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Helper: attempt to play a specific video element
     const tryPlay = useCallback((vid: HTMLVideoElement | null) => {
         if (!vid) return
         vid.muted = muted
         vid.volume = muted ? 0 : volume
+        console.log(`[VideoPlayer] Attempting to play video:`, vid.src)
         const p = vid.play()
-        if (p) p.catch(() => {
-            // Retry once muted (autoplay policy fallback)
-            vid.muted = true
-            vid.play().catch(() => { })
-        })
+        if (p !== undefined) {
+            p.catch((err) => {
+                // Ignore AbortError caused by skipping videos very quickly 
+                if (err.name === 'AbortError') return;
+                console.warn(`[VideoPlayer] Autoplay failed, falling back to muted...`, err)
+                // Retry once muted (autoplay policy fallback)
+                vid.muted = true
+                vid.play().catch(e => {
+                    if (e.name !== 'AbortError') console.error(`[VideoPlayer] Muted playback also failed:`, e)
+                })
+            })
+        }
     }, [muted, volume])
 
     // Register a module-level trigger so GamePage can call play() directly
     // from within the user's click handler (bypasses autoplay restrictions)
-    const activeSlotRef = useRef(activeSlot)
-    activeSlotRef.current = activeSlot
     useEffect(() => {
         registerVideoPlay(() => {
-            tryPlay(videoRefs.current[activeSlotRef.current])
+            // Find the current video element in the DOM
+            if (!currentVideo) return;
+            const el = document.getElementById(`vid-${currentVideo.id}`) as HTMLVideoElement;
+            if (el) tryPlay(el);
         })
-    }, [tryPlay])
+    }, [tryPlay, currentVideo])
 
     // ── Auto-play current slot when it changes ──
     useEffect(() => {
-        videoRefs.current.forEach((vid, idx) => {
+        slots.forEach((vid) => {
             if (!vid) return
-            if (idx === activeSlot) {
-                vid.muted = muted
-                vid.volume = muted ? 0 : volume
-                if (isPlaying) tryPlay(vid)
+            const el = document.getElementById(`vid-${vid.id}`) as HTMLVideoElement
+            if (!el) return
+
+            const isCurrent = vid.id === currentVideo?.id
+
+            if (isCurrent) {
+                el.muted = muted
+                el.volume = muted ? 0 : volume
+                if (isPlaying) tryPlay(el)
             } else {
-                vid.muted = true
-                vid.pause()
+                el.muted = true
+                el.pause()
             }
         })
-    }, [currentIndex, activeSlot, isPlaying, muted, volume, tryPlay])
+    }, [currentIndex, isPlaying, muted, volume, tryPlay, slots, currentVideo])
 
     // Sync play/pause state globally
     useEffect(() => {
-        const currentVideo = videoRefs.current[activeSlot]
         if (!currentVideo) return
+        const currentEl = document.getElementById(`vid-${currentVideo.id}`) as HTMLVideoElement
+        if (!currentEl) return
         if (isPlaying) {
-            tryPlay(currentVideo)
+            tryPlay(currentEl)
         } else {
-            currentVideo.pause()
+            currentEl.pause()
         }
-    }, [isPlaying, activeSlot, muted, tryPlay])
+    }, [isPlaying, muted, tryPlay, currentVideo])
 
     // ── Slide Duration Timer → auto-advance after configured seconds ──
     useEffect(() => {
@@ -105,11 +118,9 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
     const handleEnded = useCallback(() => {
         if (slideTimerRef.current) clearTimeout(slideTimerRef.current)
         setTransitioning(true)
-        const nextSlot = (activeSlot + 1) % 3
-        setActiveSlot(nextSlot)
         advance()
         setTimeout(() => setTransitioning(false), 150)
-    }, [activeSlot, advance])
+    }, [advance])
 
     // Ref to keep handleEnded fresh for the timer
     const handleEndedRef = useRef(handleEnded)
@@ -117,15 +128,16 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
 
     // ── Handle preload complete ──
     const handleCanPlay = useCallback(
-        (id: string, slotIndex: number) => {
+        (id: string) => {
             markLoaded(id)
             // If this is the active slot and we should be playing, play now.
             // This is crucial for mobile where play() must be called when media is ready.
-            if (slotIndex === activeSlot && useVideoStore.getState().isPlaying) {
-                tryPlay(videoRefs.current[slotIndex])
+            if (id === currentVideo?.id && useVideoStore.getState().isPlaying) {
+                const el = document.getElementById(`vid-${id}`) as HTMLVideoElement
+                if (el) tryPlay(el)
             }
         },
-        [markLoaded, activeSlot, tryPlay]
+        [markLoaded, currentVideo, tryPlay]
     )
 
     if (error) {
@@ -160,16 +172,20 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         )
     }
 
+    // Force rendering in reverse order so the current video is on top in DOM layering unless we use zIndex
+    // We use zIndex to ensure correct stacking without unmounting
     return (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'black', zIndex: 0, overflow: 'hidden' }}>
-            {slots.map((video, slotIndex) => {
-                if (!video) return null
-                const isCurrent = slotIndex === activeSlot
+            {slots.map((video) => {
+                const isCurrent = video.id === currentVideo?.id
+                // Current = zIndex 10, Next = zIndex 9, NextNext = zIndex 8
+                const zIndex = isCurrent ? 10 : (video.id === nextVideo?.id ? 9 : 8);
+
                 return (
                     <video
-                        key={`${video.id}-${slotIndex}`}
+                        id={`vid-${video.id}`}
+                        key={video.id} // Important: keep key pure to ID so element persists across slides!
                         ref={(el) => {
-                            videoRefs.current[slotIndex] = el
                             // When the element first mounts and we're already playing, try to play immediately
                             if (el && isCurrent && useVideoStore.getState().isPlaying) {
                                 tryPlay(el)
@@ -181,11 +197,17 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
                         muted={!isCurrent || muted}
                         playsInline
                         onEnded={isCurrent ? handleEnded : undefined}
-                        onCanPlay={() => handleCanPlay(video.id, slotIndex)}
-                        onLoadedData={() => {
+                        onCanPlay={() => handleCanPlay(video.id)}
+                        onError={(e) => {
+                            if (isCurrent) {
+                                console.warn(`[VideoPlayer] Video failed to load, automatically skipping...`, e)
+                                setTimeout(handleEnded, 500) // Skip to the next video
+                            }
+                        }}
+                        onLoadedData={(e) => {
                             // Second attempt trigger on mobile when data is fully available
-                            if (slotIndex === activeSlot && useVideoStore.getState().isPlaying) {
-                                tryPlay(videoRefs.current[slotIndex])
+                            if (isCurrent && useVideoStore.getState().isPlaying) {
+                                tryPlay(e.currentTarget as HTMLVideoElement)
                             }
                         }}
                         style={{
@@ -196,7 +218,8 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
                             height: '100vh',
                             objectFit: 'contain',
                             opacity: isCurrent ? 1 : 0,
-                            transition: transitioning ? 'opacity 0.15s ease' : 'none',
+                            zIndex: zIndex,
+                            transition: transitioning && isCurrent ? 'opacity 0.15s ease' : 'none',
                             pointerEvents: 'none',
                         }}
                     />

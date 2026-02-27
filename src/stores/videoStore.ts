@@ -3,7 +3,6 @@
 import { create } from 'zustand'
 import type { VideoItem } from '../types'
 import { fetchByNiche, searchGifs } from '../services/redgifs'
-import { fetchFromReddit } from '../services/reddit'
 import { useConfigStore } from './configStore'
 
 interface VideoStore {
@@ -38,6 +37,11 @@ const BATCH_SIZE = 20
 function proxyMedia(url: string): string {
     if (!url) return url
     if (url.startsWith('https://media.redgifs.com/')) {
+        const isDev = import.meta.env ? import.meta.env.DEV : false
+        if (isDev) {
+            // Local vite proxy for media chunks
+            return `/media-redgifs${new URL(url).pathname}`
+        }
         return `/api/media?url=${encodeURIComponent(url)}`
     }
     return url
@@ -101,59 +105,106 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             // We'll collect completely standardized VideoItems here
             const newItems: VideoItem[] = []
 
-            // -- DISTRIBUTED LOAD: Split tags perfectly between Reddit and RedGifs -- //
-            const mid = Math.ceil(tagsToFetch.length / 2)
-            const flip = Math.random() > 0.5 // Randomize who gets the odd tag if length is uneven
-            const redgifsTags = flip ? tagsToFetch.slice(0, mid) : tagsToFetch.slice(mid)
-            const redditTags = flip ? tagsToFetch.slice(mid) : tagsToFetch.slice(0, mid)
+            // All requested tags go directly to RedGifs
+            const rgTags = tagsToFetch
 
             async function tryRedgifs(tags: string[]) {
                 if (tags.length === 0) return
                 // Expand basic tags to curated high-quality paths
                 const expandedTags = tags.flatMap(t => CURATED_MAP[t]?.redgifs || [t])
-                // Deduplicate and hit max 3 to avoid rate limits
-                const uniqueTags = [...new Set(expandedTags)].slice(0, 3)
-                const perNiche = Math.max(10, Math.floor(BATCH_SIZE / uniqueTags.length))
+                // Deduplicate and hit max 10 to distribute load further and load more variety
+                const uniqueTags = [...new Set(expandedTags)].slice(0, 10)
+                // Only request 2 videos per niche to keep payload tiny and lightning fast
+                const perNiche = 2
                 const allResults: import('../services/redgifs').RedGifsGif[] = []
 
-                for (let i = 0; i < uniqueTags.length; i++) {
-                    const tag = uniqueTags[i]
-                    if (i > 0) {
-                        // 500ms delay between consecutive sequential hits
-                        await new Promise(res => setTimeout(res, 500))
+                // -- IDENTITY FILTERING --
+                const { gender, orientation } = gameConfig
+                let filteredTags = [...uniqueTags]
+
+                // If orientation is specific, we prioritize those niches
+                if (orientation === 'gay' && gender === 'male') {
+                    // Prepend or inject 'gay' niches if none are present
+                    if (!filteredTags.some(t => t.includes('gay'))) {
+                        filteredTags.unshift('gay')
                     }
-                    try {
-                        const r = await fetchByNiche(tag, currentPage, perNiche, order)
-                        if (r && r.gifs) allResults.push(...r.gifs)
-                    } catch (err) {
-                        console.warn(`[VideoStore] Niche "${tag}" failed:`, err)
+                } else if (orientation === 'lesbian' && gender === 'female') {
+                    if (!filteredTags.some(t => t.includes('lesbian'))) {
+                        filteredTags.unshift('lesbian')
                     }
                 }
 
-                if (allResults.length === 0 && uniqueTags.length > 0) {
+                // Fetch all unique tags concurrently
+                const fetchPromises = filteredTags.map(async (tag) => {
+                    try {
+                        const r = await fetchByNiche(tag, currentPage, perNiche, order)
+                        return r?.gifs || []
+                    } catch (err) {
+                        console.warn(`[VideoStore] Niche "${tag}" failed:`, err)
+                        return []
+                    }
+                })
+
+                const settledResults = await Promise.allSettled(fetchPromises)
+                for (const res of settledResults) {
+                    if (res.status === 'fulfilled') {
+                        allResults.push(...res.value)
+                    }
+                }
+
+                if (allResults.length === 0 && filteredTags.length > 0) {
                     console.warn(`[VideoStore] All niches failed or empty. Falling back to unified search.`)
                     try {
-                        const r = await searchGifs(uniqueTags, currentPage, BATCH_SIZE, order)
+                        const r = await searchGifs(filteredTags, currentPage, BATCH_SIZE * 2, order)
                         if (r && r.gifs) allResults.push(...r.gifs)
                     } catch (err) {
                         console.warn(`[VideoStore] Unified search fallback also failed:`, err)
                     }
                 }
 
-                // Filter & Format for Extreme Quality
-                const filtered = allResults.filter((g) => {
+                // Filter & Format for Extreme Quality AND Orientation
+                const filtered = allResults.filter((g: import('../services/redgifs').RedGifsGif) => {
                     // Strict Quality Filters
-                    if (g.duration && g.duration < 4) return false // No micro-loops
-                    if (g.views && g.views < 100) return false // Must have some traction
-                    if (!g.urls.hd) return false // Must have HD source
+                    if (g.views && g.views < 100) return false
 
-                    if (gifs && pictures) return true          // show all
-                    if (gifs && !pictures) return g.type === 1 // gifs/videos only
-                    if (!gifs && pictures) return g.type === 2 // images only
-                    return true                                // fallback: show all
+                    // -- ORIENTATION FILTERING --
+                    const gTags = (g.tags || []).map((t: string) => t.toLowerCase())
+                    const isGay = gTags.includes('gay')
+                    const isTrans = gTags.includes('trans') || gTags.includes('shemale') || gTags.includes('ladyboy')
+                    const isLesbian = gTags.includes('lesbian')
+
+                    if (orientation === 'straight') {
+                        if (isGay || isTrans) return false
+                        if (gender === 'male' && isLesbian) {
+                            // Generally, straight men consume lesbian content, but if we want "Strict Straight" 
+                            // we could filter it. For now, we'll allow it unless it's tagged 'gay'.
+                        }
+                    } else if (orientation === 'gay') {
+                        if (gender === 'male' && !isGay) {
+                            // If they are specifically gay, we want to hide female-centric tags
+                            if (gTags.includes('pussy') || isLesbian || gTags.includes('female solo')) return false
+                        }
+                    } else if (orientation === 'lesbian') {
+                        if (gender === 'female' && !isLesbian) {
+                            // If they are lesbian, hide male-centric tags
+                            if (isGay || gTags.includes('male solo') || gTags.includes('cock')) return false
+                        }
+                    }
+                    // Bisexual allows everything, skip specific filters
+
+                    if (gifs && !pictures) {
+                        if (g.type === 2) return false // images blocked
+                        if (g.duration && g.duration < 4) return false // No micro-loops for videos
+                        if (!g.urls.hd) return false // Must have HD source for videos
+                    }
+                    if (!gifs && pictures) {
+                        if (g.type === 1) return false // videos blocked
+                    }
+
+                    return true
                 })
 
-                filtered.forEach(g => newItems.push({
+                filtered.forEach((g: import('../services/redgifs').RedGifsGif) => newItems.push({
                     id: g.id,
                     url: proxyMedia(g.urls.hd || g.urls.sd),
                     thumbnail: g.urls.thumbnail || g.urls.poster,
@@ -173,46 +224,10 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 }))
             }
 
-            async function tryReddit(tags: string[]) {
-                if (tags.length === 0) return
-                let redditQueue: VideoItem[] = []
-
-                // Map basic tags to premium subreddits
-                const expandedTags = tags.flatMap(t => CURATED_MAP[t]?.reddit || [t])
-                const uniqueTags = [...new Set(expandedTags)].slice(0, 3)
-
-                for (const tag of uniqueTags) {
-                    try {
-                        const results = await fetchFromReddit(tag, Math.max(5, Math.floor(BATCH_SIZE / uniqueTags.length)))
-                        // format
-                        results.forEach(r => redditQueue.push({
-                            id: r.id,
-                            url: r.url,
-                            thumbnail: r.thumbnail,
-                            duration: r.duration,
-                            tags: r.tags || [],
-                            width: r.width,
-                            height: r.height,
-                            loaded: false,
-                            hasAudio: r.hasAudio,
-                            verified: false,
-                            views: 0,
-                            likes: 0,
-                            mediaType: r.mediaType,
-                            username: r.username,
-                            avgColor: '#000000',
-                            niches: [],
-                        }))
-                    } catch (err) {
-                        console.warn(`[VideoStore] Reddit fallback failed for tag ${tag}`, err)
-                    }
-                }
-                redditQueue.forEach(q => newItems.push(q))
-            }
-
-            // Execute distributed fetch (both sources get their allocated tags)
-            await tryReddit(redditTags)
-            await tryRedgifs(redgifsTags)
+            // Execute fetch concurrently
+            await Promise.allSettled([
+                tryRedgifs(rgTags)
+            ])
 
             // Shuffle results perfectly
             for (let i = newItems.length - 1; i > 0; i--) {
@@ -231,11 +246,15 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 return
             }
 
-            // Deduplicate by id (against the current queue only)
+            // Deduplicate by id against current queue AND internally within new items
             const existingIds = new Set(queue.map((v) => v.id))
-            const finalDistinctItems = newItems.filter((g) => !existingIds.has(g.id))
+            const finalDistinctItems = newItems.filter((g) => {
+                if (existingIds.has(g.id)) return false
+                existingIds.add(g.id) // Add to set to catch intra-batch duplicates
+                return true
+            })
 
-            console.log(`[VideoStore] Fetched ${finalDistinctItems.length} new items from ${tagsToFetch.length} tags. (Reddit: ${redditTags.length}, RedGifs: ${redgifsTags.length})`)
+            console.log(`[VideoStore] Fetched ${finalDistinctItems.length} new items from ${tagsToFetch.length} tags from RedGifs.`)
 
             set({
                 queue: [...queue, ...finalDistinctItems],

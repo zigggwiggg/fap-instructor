@@ -5,6 +5,9 @@ import type { GameConfig } from '../types'
 export const DEFAULT_CONFIG: GameConfig = {
     gameDurationMin: 5,
     gameDurationMax: 15,
+    gender: null,
+    orientation: null,
+    ageVerified: false,
 
     tags: ['amateur', 'blowjob', 'cumshot'],
     mediaTypes: { gifs: true, pictures: true, videos: true },

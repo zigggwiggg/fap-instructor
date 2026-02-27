@@ -5,6 +5,14 @@
       "destination": "/api/redgifs.js?path=:path*"
     },
     {
+      "source": "/api/scrolller",
+      "destination": "/api/scrolller.js"
+    },
+    {
+      "source": "/api/adultdatalink/:path*",
+      "destination": "https://api.adultdatalink.com/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

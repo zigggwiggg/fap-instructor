@@ -4,16 +4,22 @@ export default async function handler(req) {
     const { searchParams } = new URL(req.url)
     const videoUrl = searchParams.get('url')
 
-    // Only proxy media.redgifs.com URLs
-    if (!videoUrl || !videoUrl.startsWith('https://media.redgifs.com/')) {
+    // Allow redgifs and eporner to proxy
+    if (!videoUrl || (!videoUrl.includes('redgifs.com') && !videoUrl.includes('eporner.com'))) {
         return new Response('Forbidden', { status: 403 })
     }
 
     // Forward range requests for video seeking
     const headers = {
-        'Referer': 'https://www.redgifs.com/',
-        'Origin': 'https://www.redgifs.com',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    }
+
+    if (videoUrl.includes('redgifs.com')) {
+        headers['Referer'] = 'https://www.redgifs.com/'
+        headers['Origin'] = 'https://www.redgifs.com'
+    } else if (videoUrl.includes('eporner.com')) {
+        headers['Referer'] = 'https://www.eporner.com/'
+        headers['Origin'] = 'https://www.eporner.com'
     }
 
     const rangeHeader = req.headers.get('range')
