@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useVideoStore } from '../stores/videoStore'
-import { useConfigStore } from '../stores/configStore'
 import { registerVideoPlay } from '../videoControl'
+import { isMobile, getPreloadCount, getConnectionQuality } from '../utils/network'
 
 export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: boolean; volume?: number }) {
     const {
@@ -13,24 +13,26 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         advance,
         markLoaded,
     } = useVideoStore()
-    const { config } = useConfigStore()
 
     const [transitioning, setTransitioning] = useState(false)
-    const slideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const [progress, setProgress] = useState(0)
+    const rafRef = useRef<number | null>(null)
+    const mobile = isMobile()
 
-    // The 3 videos we want mounted at any time
+    // Adaptive: mount fewer videos on mobile/slow connections
+    const preloadCount = getPreloadCount()
+
     const currentVideo = queue[currentIndex]
     const nextVideo = queue[currentIndex + 1]
     const nextNextVideo = queue[currentIndex + 2]
 
-    // We filter nulls, but React keys keep the elements perfectly alive as they shift positions!
-    const slots = [currentVideo, nextVideo, nextNextVideo].filter(Boolean)
+    const allSlots = [currentVideo, nextVideo, nextNextVideo].filter(Boolean)
+    const slots = allSlots.slice(0, Math.min(allSlots.length, preloadCount))
 
     // ── Always reset and fetch fresh on mount ──
     useEffect(() => {
         const store = useVideoStore.getState()
         store.reset()
-        // Small delay to ensure state is cleared before fetching
         setTimeout(() => {
             useVideoStore.getState().fetchMore()
         }, 50)
@@ -40,14 +42,12 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         if (!vid) return
         vid.muted = muted
         vid.volume = muted ? 0 : volume
-        console.log(`[VideoPlayer] Attempting to play video:`, vid.src)
+        console.log(`[VideoPlayer] Attempting to play video:`, vid.src?.slice(-30))
         const p = vid.play()
         if (p !== undefined) {
             p.catch((err) => {
-                // Ignore AbortError caused by skipping videos very quickly 
                 if (err.name === 'AbortError') return;
                 console.warn(`[VideoPlayer] Autoplay failed, falling back to muted...`, err)
-                // Retry once muted (autoplay policy fallback)
                 vid.muted = true
                 vid.play().catch(e => {
                     if (e.name !== 'AbortError') console.error(`[VideoPlayer] Muted playback also failed:`, e)
@@ -56,11 +56,9 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         }
     }, [muted, volume])
 
-    // Register a module-level trigger so GamePage can call play() directly
-    // from within the user's click handler (bypasses autoplay restrictions)
+    // Register play trigger for GamePage's click handler
     useEffect(() => {
         registerVideoPlay(() => {
-            // Find the current video element in the DOM
             if (!currentVideo) return;
             const el = document.getElementById(`vid-${currentVideo.id}`) as HTMLVideoElement;
             if (el) tryPlay(el);
@@ -99,30 +97,34 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         }
     }, [isPlaying, muted, tryPlay, currentVideo])
 
-    // ── Slide Duration Timer → auto-advance after configured seconds ──
+    // ── Track video progress via rAF for smooth updates ──
     useEffect(() => {
-        if (slideTimerRef.current) clearTimeout(slideTimerRef.current)
-        if (!isPlaying || queue.length === 0) return
-
-        const durationMs = (config.slideDuration || 10) * 1000
-        slideTimerRef.current = setTimeout(() => {
-            handleEndedRef.current()
-        }, durationMs)
-
-        return () => {
-            if (slideTimerRef.current) clearTimeout(slideTimerRef.current)
+        const tick = () => {
+            if (currentVideo) {
+                const el = document.getElementById(`vid-${currentVideo.id}`) as HTMLVideoElement
+                if (el && el.duration && isFinite(el.duration)) {
+                    setProgress(el.currentTime / el.duration)
+                }
+            }
+            rafRef.current = requestAnimationFrame(tick)
         }
-    }, [currentIndex, isPlaying, config.slideDuration, queue.length]) // eslint-disable-line react-hooks/exhaustive-deps
+        if (isPlaying) {
+            rafRef.current = requestAnimationFrame(tick)
+        } else {
+            if (rafRef.current) cancelAnimationFrame(rafRef.current)
+        }
+        return () => {
+            if (rafRef.current) cancelAnimationFrame(rafRef.current)
+        }
+    }, [isPlaying, currentVideo])
 
-    // ── Handle video end → advance to next ──
+    // ── Handle video end → advance to next video ──
     const handleEnded = useCallback(() => {
-        if (slideTimerRef.current) clearTimeout(slideTimerRef.current)
         setTransitioning(true)
         advance()
         setTimeout(() => setTransitioning(false), 150)
     }, [advance])
 
-    // Ref to keep handleEnded fresh for the timer
     const handleEndedRef = useRef(handleEnded)
     handleEndedRef.current = handleEnded
 
@@ -130,8 +132,6 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
     const handleCanPlay = useCallback(
         (id: string) => {
             markLoaded(id)
-            // If this is the active slot and we should be playing, play now.
-            // This is crucial for mobile where play() must be called when media is ready.
             if (id === currentVideo?.id && useVideoStore.getState().isPlaying) {
                 const el = document.getElementById(`vid-${id}`) as HTMLVideoElement
                 if (el) tryPlay(el)
@@ -140,31 +140,22 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         [markLoaded, currentVideo, tryPlay]
     )
 
+    // Determine preload strategy based on connection
+    const getPreloadStrategy = useCallback((isCurrent: boolean): string => {
+        if (isCurrent) return 'auto'
+        const quality = getConnectionQuality()
+        if (quality === 'slow') return 'none'
+        if (quality === 'medium' || mobile) return 'metadata'
+        return 'auto'
+    }, [mobile])
+
     if (error) {
         return (
-            <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black' }}>
-                <p style={{ color: 'var(--color-danger)' }}>Failed to load videos</p>
-            </div>
-        )
-    }
-
-    if (isLoading && queue.length === 0) {
-        return (
-            <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black', gap: '12px' }}>
-                <div style={{ width: '2rem', height: '2rem', border: '2px solid var(--color-accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem' }}>Loading videos...</p>
-            </div>
-        )
-    }
-
-    if (!isLoading && queue.length === 0) {
-        return (
-            <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black', gap: '16px' }}>
-                <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '1rem' }}>⚠️ No videos found</p>
-                <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', textAlign: 'center', maxWidth: '260px' }}>Try selecting different categories on the home screen, or check your internet connection.</p>
+            <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black', padding: '1rem' }}>
+                <p style={{ color: 'var(--color-danger)', fontSize: mobile ? '0.9rem' : '1rem', textAlign: 'center' }}>Failed to load videos</p>
                 <button
                     onClick={() => useVideoStore.getState().fetchMore()}
-                    style={{ marginTop: '8px', padding: '8px 24px', background: 'rgba(139, 92, 246, 0.3)', border: '1px solid rgba(139, 92, 246, 0.5)', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '0.85rem' }}
+                    style={{ marginTop: '12px', padding: '10px 24px', background: 'rgba(139, 92, 246, 0.3)', border: '1px solid rgba(139, 92, 246, 0.5)', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '0.85rem' }}
                 >
                     Retry
                 </button>
@@ -172,27 +163,50 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         )
     }
 
-    // Force rendering in reverse order so the current video is on top in DOM layering unless we use zIndex
-    // We use zIndex to ensure correct stacking without unmounting
+    if (isLoading && queue.length === 0) {
+        return (
+            <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black', gap: '12px', padding: '1rem' }}>
+                <div style={{ width: '2rem', height: '2rem', border: '2px solid var(--color-accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.8rem', textAlign: 'center' }}>Loading videos...</p>
+                <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.65rem', textAlign: 'center' }}>
+                    {getConnectionQuality() === 'slow' ? '📶 Slow connection detected — using lower quality' : ''}
+                </p>
+            </div>
+        )
+    }
+
+    if (!isLoading && queue.length === 0) {
+        return (
+            <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 0, backgroundColor: 'black', gap: '16px', padding: '1rem' }}>
+                <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '1rem' }}>⚠️ No videos found</p>
+                <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', textAlign: 'center', maxWidth: '260px' }}>Try selecting different categories on the home screen, or check your internet connection.</p>
+                <button
+                    onClick={() => useVideoStore.getState().fetchMore()}
+                    style={{ marginTop: '8px', padding: '10px 24px', background: 'rgba(139, 92, 246, 0.3)', border: '1px solid rgba(139, 92, 246, 0.5)', borderRadius: '8px', color: 'white', cursor: 'pointer', fontSize: '0.85rem' }}
+                >
+                    Retry
+                </button>
+            </div>
+        )
+    }
+
     return (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'black', zIndex: 0, overflow: 'hidden' }}>
             {slots.map((video) => {
                 const isCurrent = video.id === currentVideo?.id
-                // Current = zIndex 10, Next = zIndex 9, NextNext = zIndex 8
                 const zIndex = isCurrent ? 10 : (video.id === nextVideo?.id ? 9 : 8);
 
                 return (
                     <video
                         id={`vid-${video.id}`}
-                        key={video.id} // Important: keep key pure to ID so element persists across slides!
+                        key={video.id}
                         ref={(el) => {
-                            // When the element first mounts and we're already playing, try to play immediately
                             if (el && isCurrent && useVideoStore.getState().isPlaying) {
                                 tryPlay(el)
                             }
                         }}
                         src={video.url}
-                        preload="auto"
+                        preload={getPreloadStrategy(isCurrent)}
                         loop={false}
                         muted={!isCurrent || muted}
                         playsInline
@@ -200,12 +214,11 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
                         onCanPlay={() => handleCanPlay(video.id)}
                         onError={(e) => {
                             if (isCurrent) {
-                                console.warn(`[VideoPlayer] Video failed to load, automatically skipping...`, e)
-                                setTimeout(handleEnded, 500) // Skip to the next video
+                                console.warn(`[VideoPlayer] Video failed to load, skipping...`, e)
+                                setTimeout(handleEnded, 500)
                             }
                         }}
                         onLoadedData={(e) => {
-                            // Second attempt trigger on mobile when data is fully available
                             if (isCurrent && useVideoStore.getState().isPlaying) {
                                 tryPlay(e.currentTarget as HTMLVideoElement)
                             }
@@ -225,6 +238,57 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
                     />
                 )
             })}
+
+            {/* ── Video Tag Display ── */}
+            {currentVideo && (currentVideo.searchTag || (currentVideo.tags && currentVideo.tags.length > 0)) && (
+                <div style={{
+                    position: 'absolute',
+                    left: '16px',
+                    bottom: '24px',
+                    zIndex: 20,
+                    background: 'rgba(0,0,0,0.5)',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    backdropFilter: 'blur(4px)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    display: 'flex', gap: '6px', alignItems: 'center',
+                }}>
+                    <span style={{ color: 'var(--color-accent)', fontSize: '0.85rem', fontWeight: 600, textTransform: 'capitalize' }}>
+                        #{currentVideo.searchTag || currentVideo.tags[0]}
+                    </span>
+                </div>
+            )}
+
+            {/* ── Video Progress Bar ── */}
+            <div style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                width: '100%',
+                height: '3px',
+                background: 'rgba(255,255,255,0.1)',
+                zIndex: 50,
+            }}>
+                <div style={{
+                    height: '100%',
+                    width: `${progress * 100}%`,
+                    background: 'linear-gradient(90deg, rgba(139,92,246,0.6), rgba(236,72,153,0.9))',
+                    transition: 'width 0.15s linear',
+                    position: 'relative',
+                }}>
+                    {/* Red dot at the end of progress */}
+                    <div style={{
+                        position: 'absolute',
+                        right: '-4px',
+                        top: '-3px',
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        background: '#ef4444',
+                        boxShadow: '0 0 6px rgba(239,68,68,0.8)',
+                    }} />
+                </div>
+            </div>
         </div>
     )
 }

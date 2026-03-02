@@ -17,6 +17,7 @@ export interface VideoItem {
     username: string
     avgColor: string
     niches: string[]
+    searchTag?: string
 }
 
 export interface UserPreferences {
@@ -94,6 +95,8 @@ export interface GameConfig {
     strokeSpeedMax: number
     enableGripAdjustments: boolean
     startingGripStrength: string
+
+    spicyMode: boolean
 
     finaleOrgasmProb: number
     finaleDeniedProb: number

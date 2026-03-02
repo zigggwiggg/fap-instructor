@@ -1,4 +1,4 @@
-/* ── Beat Meter Component ── */
+/* ── Beat Meter Component (Enhanced) ── */
 
 import { useEffect, useRef, useCallback } from 'react'
 import { useStrokeStore } from '../stores/strokeStore'
@@ -19,7 +19,7 @@ export default function BeatMeter({ enabled, metronomeEnabled, style = 'dot' }: 
     const lastTimeRef = useRef<number>(0)
     const posRef = useRef<number>(0.5)
     const dirRef = useRef<number>(1)
-    const pulseRef = useRef<number>(0)     // 0..1 for pulse cycle
+    const pulseRef = useRef<number>(0)
 
     // Main animation loop
     const animate = useCallback((timestamp: number) => {
@@ -51,13 +51,12 @@ export default function BeatMeter({ enabled, metronomeEnabled, style = 'dot' }: 
 
             // ── Eggplant / Pulse Ring / Wave styles ──
             if ((style === 'eggplant' || style === 'pulse' || style === 'wave') && emojiRef.current) {
-                // Pulse cycle: 0 → 1 → 0 synced to stroke speed
                 const cycleSpeed = strokeSpeed * 2 * Math.PI
                 pulseRef.current += (cycleSpeed * delta) / 1000
-                const pulse = (Math.sin(pulseRef.current) + 1) / 2  // 0..1
+                const pulse = (Math.sin(pulseRef.current) + 1) / 2
 
                 if (style === 'eggplant') {
-                    const scale = 1 + pulse * 0.5  // 1.0 → 1.5
+                    const scale = 1 + pulse * 0.5
                     const glow = pulse * 30
                     emojiRef.current.style.transform = `scale(${scale})`
                     emojiRef.current.style.filter = `drop-shadow(0 0 ${glow}px rgba(128, 90, 213, 0.8))`
@@ -67,7 +66,6 @@ export default function BeatMeter({ enabled, metronomeEnabled, style = 'dot' }: 
                     emojiRef.current.style.transform = `scale(${scale})`
                     emojiRef.current.style.opacity = `${opacity}`
                 } else if (style === 'wave') {
-                    // Wave: translate Y with sine
                     const y = Math.sin(pulseRef.current) * 8
                     const x = Math.cos(pulseRef.current * 0.5) * 20
                     emojiRef.current.style.transform = `translate(${x}px, ${y}px)`
@@ -90,7 +88,7 @@ export default function BeatMeter({ enabled, metronomeEnabled, style = 'dot' }: 
             case 'edge_buildup': case 'riding_edge': return 'rgba(251, 191, 36, 0.6)'
             case 'ruin_buildup': case 'ruined': return 'rgba(239, 68, 68, 0.6)'
             case 'edge_cooldown': case 'ruin_cooldown': return 'rgba(107, 114, 128, 0.4)'
-            default: return 'rgba(52, 211, 153, 0.5)'
+            default: return 'rgba(244, 114, 182, 0.5)'
         }
     }
 
@@ -99,7 +97,16 @@ export default function BeatMeter({ enabled, metronomeEnabled, style = 'dot' }: 
             case 'edge_buildup': case 'riding_edge': return '#fbbf24'
             case 'ruin_buildup': case 'ruined': return '#ef4444'
             case 'edge_cooldown': case 'ruin_cooldown': return '#6b7280'
-            default: return 'white'
+            default: return '#f472b6'
+        }
+    }
+
+    const getGlowColor = () => {
+        switch (phase) {
+            case 'edge_buildup': case 'riding_edge': return 'rgba(251, 191, 36, 0.4)'
+            case 'ruin_buildup': case 'ruined': return 'rgba(239, 68, 68, 0.4)'
+            case 'edge_cooldown': case 'ruin_cooldown': return 'rgba(107, 114, 128, 0.2)'
+            default: return 'rgba(244, 114, 182, 0.4)'
         }
     }
 
@@ -107,38 +114,49 @@ export default function BeatMeter({ enabled, metronomeEnabled, style = 'dot' }: 
 
     return (
         <div style={{
-            position: 'absolute', bottom: '40px', left: '0', right: '0', zIndex: 10,
+            position: 'absolute', bottom: '0', left: '0', right: '0', zIndex: 10,
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             pointerEvents: 'none',
         }}>
-            {/* ── Bouncing Dot Style ── */}
-            {style === 'dot' && (
-                <div style={{
-                    width: '100%', maxWidth: '400px', position: 'relative', height: '2px',
-                    background: `linear-gradient(90deg, transparent, ${getBarColor()}, transparent)`,
-                }}>
-                    <div style={{
-                        position: 'absolute', left: '0', top: '50%', transform: 'translateY(-50%)',
-                        width: '6px', height: '6px', borderRadius: '50%', background: 'rgba(255,255,255,0.3)'
-                    }} />
-                    <div ref={dotRef} style={{
-                        position: 'absolute', top: '50%', transform: 'translate(-50%, -50%)',
-                        left: '50%', width: '12px', height: '12px', borderRadius: '50%',
-                        background: getDotColor(),
-                        boxShadow: `0 0 8px 4px ${getBarColor()}`,
-                        transition: strokeSpeed <= 0 ? 'all 0.3s' : 'none',
-                    }} />
-                    <div style={{
-                        position: 'absolute', right: '0', top: '50%', transform: 'translateY(-50%)',
-                        width: '6px', height: '6px', borderRadius: '50%', background: 'rgba(255,255,255,0.3)'
-                    }} />
-                </div>
-            )}
 
-            {/* ── Pulsing Eggplant Style ── */}
+            <div style={{
+                width: '90%', maxWidth: '600px', position: 'relative', height: '24px',
+                marginBottom: '20px',
+            }}>
+                {/* Timeline track */}
+                <div style={{
+                    position: 'absolute', top: '50%', left: '0', right: '0', height: '2px',
+                    background: `linear-gradient(90deg, transparent 0%, ${getBarColor()} 20%, ${getBarColor()} 80%, transparent 100%)`,
+                    transform: 'translateY(-50%)',
+                }} />
+
+                {/* ── Bouncing dot overlaid ── */}
+                {style === 'dot' && (
+                    <>
+                        <div style={{
+                            position: 'absolute', left: '0', top: '50%', transform: 'translateY(-50%)',
+                            width: '4px', height: '4px', borderRadius: '50%', background: 'rgba(255,255,255,0.2)'
+                        }} />
+                        <div ref={dotRef} style={{
+                            position: 'absolute', top: '50%', transform: 'translate(-50%, -50%)',
+                            left: '50%', width: '14px', height: '14px', borderRadius: '50%',
+                            background: getDotColor(),
+                            boxShadow: `0 0 12px 6px ${getGlowColor()}`,
+                            transition: strokeSpeed <= 0 ? 'all 0.3s' : 'none',
+                            zIndex: 2,
+                        }} />
+                        <div style={{
+                            position: 'absolute', right: '0', top: '50%', transform: 'translateY(-50%)',
+                            width: '4px', height: '4px', borderRadius: '50%', background: 'rgba(255,255,255,0.2)'
+                        }} />
+                    </>
+                )}
+            </div>
+
+            {/* ── Alternative visualizations below timeline ── */}
             {style === 'eggplant' && (
                 <div ref={emojiRef} style={{
-                    fontSize: '2.5rem',
+                    fontSize: '2.5rem', marginBottom: '16px',
                     transition: strokeSpeed <= 0 ? 'all 0.3s' : 'none',
                     willChange: 'transform, filter',
                 }}>
@@ -146,10 +164,9 @@ export default function BeatMeter({ enabled, metronomeEnabled, style = 'dot' }: 
                 </div>
             )}
 
-            {/* ── Pulse Ring Style ── */}
             {style === 'pulse' && (
                 <div ref={emojiRef} style={{
-                    width: '30px', height: '30px', borderRadius: '50%',
+                    width: '30px', height: '30px', borderRadius: '50%', marginBottom: '16px',
                     border: `2px solid ${getDotColor()}`,
                     boxShadow: `0 0 15px 5px ${getBarColor()}, inset 0 0 8px ${getBarColor()}`,
                     transition: strokeSpeed <= 0 ? 'all 0.3s' : 'none',
@@ -157,9 +174,8 @@ export default function BeatMeter({ enabled, metronomeEnabled, style = 'dot' }: 
                 }} />
             )}
 
-            {/* ── Wave Style ── */}
             {style === 'wave' && (
-                <div style={{ position: 'relative', width: '60px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ position: 'relative', width: '60px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
                     <div ref={emojiRef} style={{
                         width: '14px', height: '14px', borderRadius: '50%',
                         background: getDotColor(),

@@ -9,7 +9,7 @@ export const DEFAULT_CONFIG: GameConfig = {
     orientation: null,
     ageVerified: false,
 
-    tags: ['amateur', 'blowjob', 'cumshot'],
+    tags: [],
     mediaTypes: { gifs: true, pictures: true, videos: true },
     slideDuration: 10,
 
@@ -17,6 +17,8 @@ export const DEFAULT_CONFIG: GameConfig = {
     strokeSpeedMax: 4,
     enableGripAdjustments: true,
     startingGripStrength: 'Normal',
+
+    spicyMode: false,
 
     finaleOrgasmProb: 50,
     finaleDeniedProb: 20,

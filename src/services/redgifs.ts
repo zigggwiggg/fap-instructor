@@ -1,8 +1,9 @@
 /* ── RedGifs API Client ── */
 
+import fallbackNichesData from './redgifs-niches-data.json'
+
 const TOKEN_URL = '/api/redgifs/v2/auth/temporary'
 const SEARCH_URL = '/api/redgifs/v2/gifs/search'
-const NICHES_URL = '/api/redgifs/v2/niches'
 
 interface RedGifsToken {
     token: string
@@ -74,7 +75,7 @@ export async function searchGifs(
     tags: string[],
     page = 1,
     count = 20,
-    order: SearchOrder = 'trending',
+    order?: SearchOrder | '',
     mediaType: MediaTypeFilter = 'g'
 ): Promise<{ gifs: RedGifsGif[]; pages: number; total: number }> {
     const token = await getToken()
@@ -83,8 +84,8 @@ export async function searchGifs(
         search_text: tags.join(' '),
         count: count.toString(),
         page: page.toString(),
-        order,
     })
+    if (order) params.set('order', order)
 
     // Only add type filter if not 'all'
     if (mediaType !== 'a') {
@@ -134,7 +135,7 @@ export async function fetchByNiche(
     nicheName: string,
     page = 1,
     count = 20,
-    order: SearchOrder = 'trending'
+    order?: SearchOrder | ''
 ): Promise<{ gifs: RedGifsGif[]; pages: number; total: number }> {
     const token = await getToken()
 
@@ -144,8 +145,8 @@ export async function fetchByNiche(
     const params = new URLSearchParams({
         count: count.toString(),
         page: page.toString(),
-        order,
     })
+    if (order) params.set('order', order)
 
     const url = `/api/redgifs/v2/niches/${slug}/gifs?${params}`
     console.log('[RedGifs] Fetching niche:', { nicheName, slug, url })
@@ -190,7 +191,7 @@ export async function fetchVideoUrls(
     tags: string[],
     page = 1,
     count = 20,
-    order: SearchOrder = 'trending',
+    order?: SearchOrder | '',
     mediaType: MediaTypeFilter = 'g'
 ): Promise<
     {
@@ -233,7 +234,9 @@ export async function fetchVideoUrls(
 
 /**
  * Fetch all available RedGifs niches/categories.
- * Returns an array of { name, gifs (count), subscribers, thumbnail }.
+ * The API is paginated (~30 per page, 55+ pages).
+ * We fetch all pages and cache the result in memory.
+ * Falls back to a bundled static list if the API is unreachable.
  */
 export interface RedGifsNiche {
     name: string
@@ -242,41 +245,24 @@ export interface RedGifsNiche {
     thumbnail: string
 }
 
+
+let cachedNiches: RedGifsNiche[] | null = null
+
 export async function fetchNiches(): Promise<RedGifsNiche[]> {
-    const token = await getToken()
-
-    const res = await fetch(NICHES_URL, {
-        headers: {
-            Authorization: `Bearer ${token}`,
-        },
-    })
-
-    if (!res.ok) {
-        if (res.status === 401) {
-            cachedToken = null
-            return fetchNiches()
-        }
-        throw new Error(`RedGifs niches fetch failed: ${res.status}`)
+    if (cachedNiches && cachedNiches.length > 0) {
+        return cachedNiches
     }
 
-    const data = await res.json()
-    // The API returns an object with niche names as keys
-    // or an array depending on the endpoint variant
-    if (Array.isArray(data)) {
-        return data.map((n: any) => ({
-            name: n.name || n,
-            gifs: n.gifs ?? 0,
-            subscribers: n.subscribers ?? 0,
-            thumbnail: n.thumbnail ?? '',
-        }))
-    }
-
-    // If it returns an object { niches: [...] } or similar
-    const list = data.niches || Object.values(data)
-    return (list as any[]).map((n: any) => ({
-        name: typeof n === 'string' ? n : (n.name || ''),
-        gifs: typeof n === 'string' ? 0 : (n.gifs ?? 0),
-        subscribers: typeof n === 'string' ? 0 : (n.subscribers ?? 0),
-        thumbnail: typeof n === 'string' ? '' : (n.thumbnail ?? ''),
+    // Parse bundled data, sort by popularity (most gifs first), take top 100
+    const all = (fallbackNichesData as any[]).map((n: any) => ({
+        name: n.name || '',
+        gifs: n.gifs ?? 0,
+        subscribers: n.subscribers ?? 0,
+        thumbnail: n.thumbnail ?? '',
     }))
+    all.sort((a, b) => b.gifs - a.gifs)
+    cachedNiches = all.slice(0, 100)
+    console.log(`[RedGifs] Loaded top ${cachedNiches.length} niches by popularity`)
+    return cachedNiches
 }
+

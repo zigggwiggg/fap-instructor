@@ -220,3 +220,116 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* ── Touch & Mobile Fundamentals ── */
+html {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Safe area support for notched devices */
+.safe-pad-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+.safe-pad-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* ── Mobile Responsive ── */
+@media (max-width: 768px) {
+  :root {
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+  }
+
+  /* Reduce blur on mobile for GPU performance */
+  .glass {
+    backdrop-filter: blur(8px) saturate(1.2);
+    -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  }
+
+  /* Smaller card padding */
+  .card {
+    padding: 16px;
+  }
+
+  /* Larger touch targets */
+  button,
+  [role="button"],
+  input[type="checkbox"],
+  select {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  input[type="range"] {
+    height: 44px;
+  }
+
+  /* Make text inputs taller on mobile */
+  input[type="text"],
+  input[type="number"],
+  select {
+    font-size: 16px !important;
+    /* Prevents iOS zoom on focus */
+    padding: 12px !important;
+  }
+
+  /* Glow button mobile */
+  .btn-glow {
+    padding: 14px 24px;
+    font-size: 1rem;
+  }
+
+  .video-stage {
+    border-radius: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  :root {
+    --radius-lg: 8px;
+    --radius-md: 6px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  .btn-glow {
+    padding: 12px 20px;
+    font-size: 0.95rem;
+  }
+}
+
+/* ── Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-pulse-glow {
+    animation: none;
+  }
+}
+
+/* ── Data Saver Hint ── */
+@media (prefers-reduced-data: reduce) {
+  .glass {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(26, 26, 46, 0.9);
+  }
+}

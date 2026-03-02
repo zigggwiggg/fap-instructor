@@ -85,6 +85,8 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         const { registeredActions, isExecuting } = get()
         if (isExecuting) return
 
+        if (!useConfigStore.getState().config.spicyMode) return
+
         // Filter actions by gender and intensity
         let eligible = [...registeredActions]
 

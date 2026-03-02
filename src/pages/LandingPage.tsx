@@ -3,6 +3,17 @@ import { useState, useEffect } from 'react'
 import { useConfigStore } from '../stores/configStore'
 import { fetchNiches, type RedGifsNiche } from '../services/redgifs'
 
+// Responsive hook
+function useIsMobile() {
+    const [mobile, setMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth <= 768 : false)
+    useEffect(() => {
+        const handler = () => setMobile(window.innerWidth <= 768)
+        window.addEventListener('resize', handler)
+        return () => window.removeEventListener('resize', handler)
+    }, [])
+    return mobile
+}
+
 // Helper component for section headers
 const SectionHeader = ({ title }: { title: string }) => (
     <h2
@@ -41,9 +52,9 @@ const InputRow = ({ label, children }: { label: string; children: React.ReactNod
 export default function LandingPage() {
     const navigate = useNavigate()
     const { config, updateConfig, updateTasks } = useConfigStore()
+    const mobile = useIsMobile()
 
     // Local state for tags input
-    const [tagsInput, setTagsInput] = useState(config.tags.join(', '))
     const [niches, setNiches] = useState<RedGifsNiche[]>([])
     const [nichesLoading, setNichesLoading] = useState(false)
     const [nichesError, setNichesError] = useState('')
@@ -71,22 +82,11 @@ export default function LandingPage() {
         } else {
             updateConfig({ tags: [...current, tag] })
         }
-        // Keep text input in sync
-        const updated = config.tags.includes(tag)
-            ? config.tags.filter((t) => t !== tag)
-            : [...config.tags, tag]
-        setTagsInput(updated.join(', '))
     }
 
     const handleStart = () => {
-        // Merge custom text tags with the already-selected category tags
-        const textTags = tagsInput
-            .split(',')
-            .map((t) => t.trim().toLowerCase())
-            .filter((t) => t.length > 0)
-
-        // Combine: config.tags (from category checkboxes) + any extra text tags, deduplicated
-        const allTags = [...new Set([...config.tags, ...textTags])]
+        // Just use config.tags directly
+        const allTags = [...new Set(config.tags)]
         updateConfig({ tags: allTags.length > 0 ? allTags : ['nsfw'] })
         navigate('/play')
     }
@@ -97,7 +97,7 @@ export default function LandingPage() {
                 <h4 style={{ fontSize: '0.9rem', color: 'var(--color-accent)', marginBottom: '0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     {category}
                 </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: mobile ? 'repeat(auto-fit, minmax(140px, 1fr))' : 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem' }}>
                     {Object.entries(labels).map(([key, label]) => (
                         <label
                             key={key}
@@ -168,7 +168,7 @@ export default function LandingPage() {
                 }}
             />
 
-            <div className="animate-fade-in" style={{ zIndex: 1, width: '100%', maxWidth: '800px' }}>
+            <div className="animate-fade-in" style={{ zIndex: 1, width: '100%', maxWidth: mobile ? '100%' : '800px', padding: mobile ? '0 4px' : '0' }}>
                 {/* ── Header ── */}
                 <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
                     <h1
@@ -213,7 +213,7 @@ export default function LandingPage() {
 
                     {/* 1. Game Duration */}
                     <SectionHeader title="Game Duration" />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: '1rem' }}>
                         <InputRow label="Minimum Game Duration (min)">
                             <input
                                 type="number"
@@ -257,7 +257,17 @@ export default function LandingPage() {
                                     type="text"
                                     value={nicheSearch}
                                     onChange={(e) => setNicheSearch(e.target.value)}
-                                    placeholder="Search categories..."
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && nicheSearch.trim()) {
+                                            const tag = nicheSearch.trim().toLowerCase()
+                                            if (!config.tags.includes(tag)) {
+                                                const merged = [...config.tags, tag]
+                                                updateConfig({ tags: merged })
+                                            }
+                                            setNicheSearch('')
+                                        }
+                                    }}
+                                    placeholder="Search or type a custom niche & press Enter..."
                                     style={{ flex: 1, padding: '6px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'white', fontSize: '0.8rem' }}
                                 />
                                 <button
@@ -269,12 +279,10 @@ export default function LandingPage() {
                                             // Deselect all visible
                                             const remaining = config.tags.filter((t) => !visibleTags.includes(t))
                                             updateConfig({ tags: remaining })
-                                            setTagsInput(remaining.join(', '))
                                         } else {
                                             // Select all visible
                                             const merged = [...new Set([...config.tags, ...visibleTags])]
                                             updateConfig({ tags: merged })
-                                            setTagsInput(merged.join(', '))
                                         }
                                     }}
                                     style={{
@@ -291,8 +299,8 @@ export default function LandingPage() {
 
                             {/* Niche Grid */}
                             <div style={{
-                                maxHeight: '220px', overflowY: 'auto', padding: '8px',
-                                display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '4px',
+                                maxHeight: mobile ? '240px' : '300px', overflowY: 'auto', padding: '8px',
+                                display: 'grid', gridTemplateColumns: mobile ? 'repeat(auto-fill, minmax(120px, 1fr))' : 'repeat(auto-fill, minmax(160px, 1fr))', gap: '4px',
                             }}>
                                 {nichesLoading && <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', gridColumn: '1 / -1' }}>Loading categories...</p>}
                                 {nichesError && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem', gridColumn: '1 / -1' }}>Error: {nichesError}</p>}
@@ -329,262 +337,224 @@ export default function LandingPage() {
                                         )
                                     })}
                             </div>
+                        </div>
+                    </InputRow>
 
-                            {/* Selected tags + custom input */}
-                            <div style={{ borderTop: '1px solid var(--color-border)', padding: '8px 10px' }}>
-                                {config.tags.length > 0 && (
-                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                                        {config.tags.map((tag) => (
-                                            <span
-                                                key={tag}
-                                                onClick={() => toggleNicheTag(tag)}
-                                                style={{
-                                                    fontSize: '0.75rem', padding: '3px 10px', borderRadius: '12px', cursor: 'pointer',
-                                                    background: 'rgba(139, 92, 246, 0.2)', color: 'var(--color-accent)',
-                                                    border: '1px solid rgba(139, 92, 246, 0.3)', transition: 'all 0.15s'
-                                                }}
-                                            >
-                                                {tag} ✕
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
+                    {/* Spicy Settings Toggle */}
+                    <div style={{ padding: '1.5rem', marginTop: '1rem', background: 'rgba(225, 29, 72, 0.05)', borderRadius: 'var(--radius-md)', border: '1px solid rgba(225, 29, 72, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-primary)', marginBottom: '4px' }}>Spicy Settings</h3>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: 0 }}>Enable orgasms, edging, ruin, tasks, and more advanced features.</p>
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={config.spicyMode}
+                                onChange={(e) => updateConfig({ spicyMode: e.target.checked })}
+                                style={{ accentColor: 'var(--color-primary)', width: '20px', height: '20px' }}
+                            />
+                        </label>
+                    </div>
+
+                    {config.spicyMode && (
+                        <>
+                            {/* 3. Stroke */}
+                            <SectionHeader title="Stroke" />
+                            <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: '1rem' }}>
+                                <InputRow label="Minimum Stroke Speed (per sec)">
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0.1"
+                                        value={config.strokeSpeedMin}
+                                        onChange={(e) => {
+                                            const val = parseFloat(e.target.value) || 0.1
+                                            updateConfig({ strokeSpeedMin: val, strokeSpeedMax: Math.max(config.strokeSpeedMax, val) })
+                                        }}
+                                        style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }}
+                                    />
+                                </InputRow>
+                                <InputRow label="Maximum Stroke Speed (per sec)">
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0.1"
+                                        value={config.strokeSpeedMax}
+                                        onChange={(e) => {
+                                            const val = parseFloat(e.target.value) || 0.1
+                                            updateConfig({ strokeSpeedMax: val, strokeSpeedMin: Math.min(config.strokeSpeedMin, val) })
+                                        }}
+                                        style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }}
+                                    />
+                                </InputRow>
+                            </div>
+
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '1rem' }}>
                                 <input
-                                    type="text"
-                                    value={tagsInput}
-                                    onChange={(e) => setTagsInput(e.target.value)}
-                                    placeholder="Add custom tags (comma-separated), e.g. teasing, joi"
-                                    style={{ width: '100%', padding: '7px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'white', fontSize: '0.8rem' }}
+                                    type="checkbox"
+                                    checked={config.enableGripAdjustments}
+                                    onChange={(e) => updateConfig({ enableGripAdjustments: e.target.checked })}
+                                    style={{ accentColor: 'var(--color-accent-secondary)', width: '18px', height: '18px' }}
                                 />
-                            </div>
-                        </div>
-                    </InputRow>
+                                Enable grip adjustments
+                            </label>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
-                        <InputRow label="Media Type">
-                            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-                                {(['gifs', 'pictures', 'videos'] as const).map((type) => (
-                                    <label key={type} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem' }}>
-                                        <input
-                                            type="checkbox"
-                                            checked={config.mediaTypes[type as keyof typeof config.mediaTypes]}
-                                            onChange={(e) => updateConfig({ mediaTypes: { ...config.mediaTypes, [type]: e.target.checked } })}
-                                            style={{ accentColor: 'var(--color-accent)', width: '18px', height: '18px' }}
-                                        />
-                                        <span style={{ textTransform: 'capitalize' }}>{type}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </InputRow>
-                    </div>
-
-                    <InputRow label={`Slide Duration: ${config.slideDuration}s`}>
-                        <input
-                            type="range"
-                            min="3" max="60"
-                            value={config.slideDuration}
-                            onChange={(e) => updateConfig({ slideDuration: parseInt(e.target.value) })}
-                            style={{ width: '100%', accentColor: 'var(--color-accent)' }}
-                        />
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                            <span>3s</span><span>10s</span><span>30s</span><span>60s</span>
-                        </div>
-                    </InputRow>
-
-                    {/* 3. Stroke */}
-                    <SectionHeader title="Stroke" />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <InputRow label="Minimum Stroke Speed (per sec)">
-                            <input
-                                type="number"
-                                step="0.01"
-                                min="0.1"
-                                value={config.strokeSpeedMin}
-                                onChange={(e) => {
-                                    const val = parseFloat(e.target.value) || 0.1
-                                    updateConfig({ strokeSpeedMin: val, strokeSpeedMax: Math.max(config.strokeSpeedMax, val) })
-                                }}
-                                style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }}
-                            />
-                        </InputRow>
-                        <InputRow label="Maximum Stroke Speed (per sec)">
-                            <input
-                                type="number"
-                                step="0.01"
-                                min="0.1"
-                                value={config.strokeSpeedMax}
-                                onChange={(e) => {
-                                    const val = parseFloat(e.target.value) || 0.1
-                                    updateConfig({ strokeSpeedMax: val, strokeSpeedMin: Math.min(config.strokeSpeedMin, val) })
-                                }}
-                                style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }}
-                            />
-                        </InputRow>
-                    </div>
-
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                        <input
-                            type="checkbox"
-                            checked={config.enableGripAdjustments}
-                            onChange={(e) => updateConfig({ enableGripAdjustments: e.target.checked })}
-                            style={{ accentColor: 'var(--color-accent-secondary)', width: '18px', height: '18px' }}
-                        />
-                        Enable grip adjustments
-                    </label>
-
-                    <InputRow label="Starting Grip Strength">
-                        <select
-                            value={config.startingGripStrength}
-                            onChange={(e) => updateConfig({ startingGripStrength: e.target.value })}
-                            style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', outline: 'none' }}
-                        >
-                            <option value="Light">Light</option>
-                            <option value="Normal">Normal</option>
-                            <option value="Tight">Tight</option>
-                        </select>
-                    </InputRow>
-
-                    {/* 4. Game Finale */}
-                    <SectionHeader title="Game Finale" />
-                    <InputRow label={`Probability of an orgasm: ${config.finaleOrgasmProb}%`}>
-                        <input type="range" min="0" max="100" value={config.finaleOrgasmProb} onChange={(e) => updateConfig({ finaleOrgasmProb: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent)' }} />
-                    </InputRow>
-                    <InputRow label={`Probability to be denied an orgasm: ${config.finaleDeniedProb}%`}>
-                        <input type="range" min="0" max="100" value={config.finaleDeniedProb} onChange={(e) => updateConfig({ finaleDeniedProb: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent)' }} />
-                    </InputRow>
-                    <InputRow label={`Probability of a ruined orgasm: ${config.finaleRuinedProb}%`}>
-                        <input type="range" min="0" max="100" value={config.finaleRuinedProb} onChange={(e) => updateConfig({ finaleRuinedProb: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent)' }} />
-                    </InputRow>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '-8px' }}>Values automatically normalize at execution time.</p>
-
-
-                    {/* 5. Edging */}
-                    <SectionHeader title="Edging" />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <InputRow label="Minimum Edges">
-                            <input type="number" min="0" value={config.edgesMin} onChange={(e) => {
-                                const val = parseInt(e.target.value) || 0;
-                                updateConfig({ edgesMin: val, edgesMax: Math.max(config.edgesMax, val) })
-                            }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
-                        </InputRow>
-                        <InputRow label="Maximum Edges">
-                            <input type="number" min="0" value={config.edgesMax} onChange={(e) => {
-                                const val = parseInt(e.target.value) || 0;
-                                updateConfig({ edgesMax: val, edgesMin: Math.min(config.edgesMin, val) })
-                            }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
-                        </InputRow>
-                    </div>
-                    <InputRow label={`Edge Cooldown: ${config.edgeCooldown}s`}>
-                        <input type="range" min="5" max="60" value={config.edgeCooldown} onChange={(e) => updateConfig({ edgeCooldown: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent)' }} />
-                        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>Duration to rest before the game continues.</p>
-                    </InputRow>
-
-
-                    {/* 6. Ruined Orgasms */}
-                    <SectionHeader title="Ruined Orgasms" />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <InputRow label="Minimum Ruined Orgasms">
-                            <input type="number" min="0" value={config.ruinedOrgasmsMin} onChange={(e) => {
-                                const val = parseInt(e.target.value) || 0
-                                updateConfig({ ruinedOrgasmsMin: val, ruinedOrgasmsMax: Math.max(config.ruinedOrgasmsMax, val) })
-                            }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
-                        </InputRow>
-                        <InputRow label="Maximum Ruined Orgasms">
-                            <input type="number" min="0" value={config.ruinedOrgasmsMax} onChange={(e) => {
-                                const val = parseInt(e.target.value) || 0
-                                updateConfig({ ruinedOrgasmsMax: val, ruinedOrgasmsMin: Math.min(config.ruinedOrgasmsMin, val) })
-                            }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
-                        </InputRow>
-                    </div>
-
-                    {/* 7. Post Orgasm Torture */}
-                    <SectionHeader title="Post Orgasm Torture" />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                        <input
-                            type="checkbox"
-                            checked={config.enablePostOrgasmTorture}
-                            onChange={(e) => updateConfig({ enablePostOrgasmTorture: e.target.checked })}
-                            style={{ accentColor: 'var(--color-accent-secondary)', width: '18px', height: '18px' }}
-                        />
-                        Enable Post Orgasm Torture
-                    </label>
-                    {config.enablePostOrgasmTorture && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                            <InputRow label="Minimum Time (sec)">
-                                <input type="number" min="1" value={config.postOrgasmMin} onChange={(e) => {
-                                    const val = parseInt(e.target.value) || 1
-                                    updateConfig({ postOrgasmMin: val, postOrgasmMax: Math.max(config.postOrgasmMax, val) })
-                                }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
+                            <InputRow label="Starting Grip Strength">
+                                <select
+                                    value={config.startingGripStrength}
+                                    onChange={(e) => updateConfig({ startingGripStrength: e.target.value })}
+                                    style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', outline: 'none' }}
+                                >
+                                    <option value="Light">Light</option>
+                                    <option value="Normal">Normal</option>
+                                    <option value="Tight">Tight</option>
+                                </select>
                             </InputRow>
-                            <InputRow label="Maximum Time (sec)">
-                                <input type="number" min="1" value={config.postOrgasmMax} onChange={(e) => {
-                                    const val = parseInt(e.target.value) || 1
-                                    updateConfig({ postOrgasmMax: val, postOrgasmMin: Math.min(config.postOrgasmMin, val) })
-                                }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
+
+                            {/* 4. Game Finale */}
+                            <SectionHeader title="Game Finale" />
+                            <InputRow label={`Probability of an orgasm: ${config.finaleOrgasmProb}%`}>
+                                <input type="range" min="0" max="100" value={config.finaleOrgasmProb} onChange={(e) => updateConfig({ finaleOrgasmProb: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent)' }} />
                             </InputRow>
-                        </div>
+                            <InputRow label={`Probability to be denied an orgasm: ${config.finaleDeniedProb}%`}>
+                                <input type="range" min="0" max="100" value={config.finaleDeniedProb} onChange={(e) => updateConfig({ finaleDeniedProb: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent)' }} />
+                            </InputRow>
+                            <InputRow label={`Probability of a ruined orgasm: ${config.finaleRuinedProb}%`}>
+                                <input type="range" min="0" max="100" value={config.finaleRuinedProb} onChange={(e) => updateConfig({ finaleRuinedProb: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent)' }} />
+                            </InputRow>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '-8px' }}>Values automatically normalize at execution time.</p>
+
+
+                            {/* 5. Edging */}
+                            <SectionHeader title="Edging" />
+                            <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: '1rem' }}>
+                                <InputRow label="Minimum Edges">
+                                    <input type="number" min="0" value={config.edgesMin} onChange={(e) => {
+                                        const val = parseInt(e.target.value) || 0;
+                                        updateConfig({ edgesMin: val, edgesMax: Math.max(config.edgesMax, val) })
+                                    }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
+                                </InputRow>
+                                <InputRow label="Maximum Edges">
+                                    <input type="number" min="0" value={config.edgesMax} onChange={(e) => {
+                                        const val = parseInt(e.target.value) || 0;
+                                        updateConfig({ edgesMax: val, edgesMin: Math.min(config.edgesMin, val) })
+                                    }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
+                                </InputRow>
+                            </div>
+                            <InputRow label={`Edge Cooldown: ${config.edgeCooldown}s`}>
+                                <input type="range" min="5" max="60" value={config.edgeCooldown} onChange={(e) => updateConfig({ edgeCooldown: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent)' }} />
+                                <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>Duration to rest before the game continues.</p>
+                            </InputRow>
+
+
+                            {/* 6. Ruined Orgasms */}
+                            <SectionHeader title="Ruined Orgasms" />
+                            <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: '1rem' }}>
+                                <InputRow label="Minimum Ruined Orgasms">
+                                    <input type="number" min="0" value={config.ruinedOrgasmsMin} onChange={(e) => {
+                                        const val = parseInt(e.target.value) || 0
+                                        updateConfig({ ruinedOrgasmsMin: val, ruinedOrgasmsMax: Math.max(config.ruinedOrgasmsMax, val) })
+                                    }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
+                                </InputRow>
+                                <InputRow label="Maximum Ruined Orgasms">
+                                    <input type="number" min="0" value={config.ruinedOrgasmsMax} onChange={(e) => {
+                                        const val = parseInt(e.target.value) || 0
+                                        updateConfig({ ruinedOrgasmsMax: val, ruinedOrgasmsMin: Math.min(config.ruinedOrgasmsMin, val) })
+                                    }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
+                                </InputRow>
+                            </div>
+
+                            {/* 7. Post Orgasm Torture */}
+                            <SectionHeader title="Post Orgasm Torture" />
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem', marginBottom: '1rem' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={config.enablePostOrgasmTorture}
+                                    onChange={(e) => updateConfig({ enablePostOrgasmTorture: e.target.checked })}
+                                    style={{ accentColor: 'var(--color-accent-secondary)', width: '18px', height: '18px' }}
+                                />
+                                Enable Post Orgasm Torture
+                            </label>
+                            {config.enablePostOrgasmTorture && (
+                                <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: '1rem' }}>
+                                    <InputRow label="Minimum Time (sec)">
+                                        <input type="number" min="1" value={config.postOrgasmMin} onChange={(e) => {
+                                            const val = parseInt(e.target.value) || 1
+                                            updateConfig({ postOrgasmMin: val, postOrgasmMax: Math.max(config.postOrgasmMax, val) })
+                                        }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
+                                    </InputRow>
+                                    <InputRow label="Maximum Time (sec)">
+                                        <input type="number" min="1" value={config.postOrgasmMax} onChange={(e) => {
+                                            const val = parseInt(e.target.value) || 1
+                                            updateConfig({ postOrgasmMax: val, postOrgasmMin: Math.min(config.postOrgasmMin, val) })
+                                        }} style={{ width: '100%', padding: '10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'white' }} />
+                                    </InputRow>
+                                </div>
+                            )}
+
+
+                            {/* 8. Tasks */}
+                            <SectionHeader title="Tasks" />
+                            <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '1.5rem', background: 'rgba(0,0,0,0.2)' }}>
+
+                                {renderTaskSection('speed', {
+                                    doubleStrokes: 'Double Strokes',
+                                    halvedStrokes: 'Halved Strokes',
+                                    teasingStrokes: 'Teasing Strokes',
+                                    randomStrokeSpeeds: 'Random Stroke Speeds',
+                                    accelerationCycles: 'Acceleration Cycles',
+                                    randomBeat: 'Random Beat',
+                                    redLightGreenLight: 'Red Light Green Light',
+                                    clusterStrokes: 'Cluster Strokes'
+                                })}
+
+                                {renderTaskSection('style', {
+                                    dominant: 'Dominant Hand',
+                                    nonDominant: 'Non-Dominant Hand',
+                                    headOnly: 'Head Only',
+                                    shaftOnly: 'Shaft Only',
+                                    overhandGrip: 'Overhand Grip'
+                                })}
+
+                                {renderTaskSection('cbt', {
+                                    ballSlaps: 'Ball Slaps',
+                                    bindCockAndBalls: 'Bind Cock And Balls',
+                                    rubberBands: 'Rubber Bands',
+                                    clothespins: 'Clothespins',
+                                    icyHot: 'Icy/Hot Element',
+                                    toothpaste: 'Toothpaste',
+                                    icePlay: 'Ice Play',
+                                    ballSqueeze: 'Ball Squeeze',
+                                    headPalming: 'Head Palming',
+                                    scratching: 'Scratching',
+                                    flicking: 'Flicking',
+                                    breathPlay: 'Breath Play'
+                                })}
+
+                                {renderTaskSection('cei', {
+                                    eatCum: 'Eat Cum (CEI)',
+                                    precum: 'Precum (CEI)'
+                                })}
+
+                                {renderTaskSection('anal', {
+                                    buttPlug: 'Butt Plug'
+                                })}
+
+                                {renderTaskSection('misc', {
+                                    pickYourPoison: 'Pick Your Poison'
+                                })}
+
+                                <InputRow label={`Task Frequency: ${config.taskFrequency}s`}>
+                                    <input type="range" min="5" max="60" value={config.taskFrequency} onChange={(e) => updateConfig({ taskFrequency: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent-secondary)' }} />
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                        <span>5s</span><span>15s</span><span>30s</span><span>60s</span>
+                                    </div>
+                                </InputRow>
+
+                            </div>
+
+                        </>
                     )}
-
-
-                    {/* 8. Tasks */}
-                    <SectionHeader title="Tasks" />
-                    <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: '1.5rem', background: 'rgba(0,0,0,0.2)' }}>
-
-                        {renderTaskSection('speed', {
-                            doubleStrokes: 'Double Strokes',
-                            halvedStrokes: 'Halved Strokes',
-                            teasingStrokes: 'Teasing Strokes',
-                            randomStrokeSpeeds: 'Random Stroke Speeds',
-                            accelerationCycles: 'Acceleration Cycles',
-                            randomBeat: 'Random Beat',
-                            redLightGreenLight: 'Red Light Green Light',
-                            clusterStrokes: 'Cluster Strokes'
-                        })}
-
-                        {renderTaskSection('style', {
-                            dominant: 'Dominant Hand',
-                            nonDominant: 'Non-Dominant Hand',
-                            headOnly: 'Head Only',
-                            shaftOnly: 'Shaft Only',
-                            overhandGrip: 'Overhand Grip'
-                        })}
-
-                        {renderTaskSection('cbt', {
-                            ballSlaps: 'Ball Slaps',
-                            bindCockAndBalls: 'Bind Cock And Balls',
-                            rubberBands: 'Rubber Bands',
-                            clothespins: 'Clothespins',
-                            icyHot: 'Icy/Hot Element',
-                            toothpaste: 'Toothpaste',
-                            icePlay: 'Ice Play',
-                            ballSqueeze: 'Ball Squeeze',
-                            headPalming: 'Head Palming',
-                            scratching: 'Scratching',
-                            flicking: 'Flicking',
-                            breathPlay: 'Breath Play'
-                        })}
-
-                        {renderTaskSection('cei', {
-                            eatCum: 'Eat Cum (CEI)',
-                            precum: 'Precum (CEI)'
-                        })}
-
-                        {renderTaskSection('anal', {
-                            buttPlug: 'Butt Plug'
-                        })}
-
-                        {renderTaskSection('misc', {
-                            pickYourPoison: 'Pick Your Poison'
-                        })}
-
-                        <InputRow label={`Task Frequency: ${config.taskFrequency}s`}>
-                            <input type="range" min="5" max="60" value={config.taskFrequency} onChange={(e) => updateConfig({ taskFrequency: parseInt(e.target.value) })} style={{ width: '100%', accentColor: 'var(--color-accent-secondary)' }} />
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                                <span>5s</span><span>15s</span><span>30s</span><span>60s</span>
-                            </div>
-                        </InputRow>
-
-                    </div>
 
                     <button
                         className="btn-glow animate-pulse-glow"

@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-// import { useNavigate } from 'react-router-dom'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useTaskStore } from '../stores/taskStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useConfigStore } from '../stores/configStore'
@@ -7,10 +6,22 @@ import { useStrokeStore } from '../stores/strokeStore'
 import VideoPlayer from '../components/VideoPlayer'
 import TaskDisplay from '../components/TaskDisplay'
 import BeatMeter, { type BeatStyle } from '../components/BeatMeter'
+import InstructionHistory, { type HistoryEntry } from '../components/InstructionHistory'
 import type { Action } from '../types'
 import { triggerVideoPlay } from '../videoControl'
 import { audioEngine } from '../audioEngine'
 import { useAudioStore } from '../stores/audioStore'
+
+// Responsive hook
+function useIsMobile() {
+    const [mobile, setMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth <= 768 : false)
+    useEffect(() => {
+        const handler = () => setMobile(window.innerWidth <= 768)
+        window.addEventListener('resize', handler)
+        return () => window.removeEventListener('resize', handler)
+    }, [])
+    return mobile
+}
 
 
 
@@ -26,7 +37,6 @@ const DEMO_ACTIONS: Action[] = [
         minIntensity: 'light',
         execute: async () => ({ completed: true, skipped: false, duration: 30 }),
     },
-    // Adding more just so something triggers
     {
         id: 'speed-fast',
         label: 'Speed Up',
@@ -58,7 +68,35 @@ const CustomToggle = ({ label, checked, onChange }: { label: string, checked: bo
     </div>
 )
 
+// Icon button for the top toolbar
+const ToolbarBtn = ({ icon, label, onClick, active, hotkey, compact }: {
+    icon: string, label: string, onClick: () => void, active?: boolean, hotkey?: string, compact?: boolean
+}) => (
+    <button
+        onClick={onClick}
+        title={`${label}${hotkey ? ` (${hotkey})` : ''}`}
+        style={{
+            background: active ? 'rgba(139, 92, 246, 0.3)' : 'rgba(255,255,255,0.08)',
+            border: active ? '1px solid rgba(139, 92, 246, 0.4)' : '1px solid rgba(255,255,255,0.1)',
+            borderRadius: '8px',
+            padding: compact ? '8px' : '6px 10px',
+            cursor: 'pointer',
+            color: active ? '#a78bfa' : 'rgba(255,255,255,0.7)',
+            fontSize: compact ? '1rem' : '0.85rem',
+            display: 'flex', alignItems: 'center', gap: '4px',
+            transition: 'all 0.2s', whiteSpace: 'nowrap',
+            minWidth: compact ? '40px' : 'auto',
+            minHeight: compact ? '40px' : 'auto',
+            justifyContent: 'center',
+        }}
+    >
+        {icon}
+        {!compact && hotkey && <span style={{ fontSize: '0.65rem', opacity: 0.6 }}>{hotkey}</span>}
+    </button>
+)
+
 export default function GamePage() {
+    const mobile = useIsMobile()
     const { registerActions, start, stop } = useTaskStore()
     const { isPlaying, resume, pause, advance, goBack } = useVideoStore()
     const { config } = useConfigStore()
@@ -68,6 +106,12 @@ export default function GamePage() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
     const [hasStarted, setHasStarted] = useState(false)
     const [beatStyle, setBeatStyle] = useState<BeatStyle>('dot')
+    const [discreetMode, setDiscreetMode] = useState(false)
+    const [showHotkeys, setShowHotkeys] = useState(false)
+    const [instructionHistory, setInstructionHistory] = useState<HistoryEntry[]>([])
+    const [showHistory, setShowHistory] = useState(!mobile) // Hidden by default on mobile
+    const historyIdRef = useRef(0)
+
     const {
         masterVolume, setMasterVolume,
         moansEnabled, toggleMoans,
@@ -99,6 +143,36 @@ export default function GamePage() {
 
     const currentAction = useTaskStore(s => s.currentAction)
 
+    // Helper to add to instruction history
+    const addToHistory = useCallback((text: string, type: HistoryEntry['type'] = 'notification') => {
+        const now = new Date()
+        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        historyIdRef.current += 1
+        setInstructionHistory(prev => [...prev.slice(-50), { // Keep last 50 entries
+            id: historyIdRef.current,
+            time: timeStr,
+            text,
+            type,
+        }])
+    }, [])
+
+    // Track notifications in history
+    useEffect(() => {
+        if (notification && hasStarted) {
+            const type = notification.includes('edge') || notification.includes('Edge') ? 'edge'
+                : notification.includes('RUIN') || notification.includes('ruin') || notification.includes('Ruin') ? 'ruin'
+                    : 'notification'
+            addToHistory(notification, type)
+        }
+    }, [notification, hasStarted, addToHistory])
+
+    // Track tasks in history
+    useEffect(() => {
+        if (currentAction && hasStarted) {
+            addToHistory(`${currentAction.label}: ${currentAction.description}`, 'task')
+        }
+    }, [currentAction, hasStarted, addToHistory])
+
     useEffect(() => {
         registerActions(DEMO_ACTIONS)
         start()
@@ -113,7 +187,7 @@ export default function GamePage() {
     // Voice & JOI bindings
     useEffect(() => {
         if (!hasStarted || !voiceEnabled || !notification) return
-        audioEngine.playVoice('command') // Using generic command for notifications
+        audioEngine.playVoice('command')
     }, [notification, hasStarted, voiceEnabled])
 
     useEffect(() => {
@@ -121,22 +195,13 @@ export default function GamePage() {
         audioEngine.playVoice('command')
     }, [currentAction, hasStarted, voiceEnabled])
 
-    // Redundant moan audio loop removed as audioEngine handles its own loop based on strokeSpeed
-
 
     // Session timer (pauses when game is paused)
     useEffect(() => {
         if (!hasStarted) return
         const timer = setInterval(() => {
-            if (!useVideoStore.getState().isPlaying) return  // don't tick while paused
-            setSessionTime((t) => {
-                const newTime = t + 1
-                // Progressively unlock more categories every 90 seconds
-                if (newTime % 90 === 0) {
-                    useVideoStore.getState().unlockMoreTags()
-                }
-                return newTime
-            })
+            if (!useVideoStore.getState().isPlaying) return
+            setSessionTime((t) => t + 1)
         }, 1000)
         return () => clearInterval(timer)
     }, [hasStarted])
@@ -149,34 +214,49 @@ export default function GamePage() {
         const stroke = useStrokeStore.getState()
         if (!playing || stroke.isPaused || stroke.phase !== 'stroking') return
 
-        // Phase 1: WARM UP (first 10% of total time) - start slow, ramp up to normal
+        if (!config.spicyMode) {
+            // Vanilla Mode: linear speed acceleration from min to max over the session duration
+            const progress = Math.min(1, sessionTime / gamePlan.durationSeconds)
+            // Use defaults: e.g. 0.5 to 3.5 strokes/sec
+            const minSpeed = 0.5
+            const maxSpeed = 3.5
+            const targetSpeed = minSpeed + (maxSpeed - minSpeed) * progress
+            stroke.setStrokeSpeed(targetSpeed)
+
+            if (sessionTime === gamePlan.durationSeconds && !gamePlan.finaleTriggered) {
+                setGamePlan(prev => prev ? { ...prev, finaleTriggered: true } : null)
+                stroke.setPhase('orgasm')
+                stroke.setNotification('💥 CLIMAX!')
+            }
+
+            if (gamePlan.finaleTriggered && sessionTime >= gamePlan.durationSeconds + 15 && !gamePlan.showAnotherGame) {
+                setGamePlan(prev => prev ? { ...prev, showAnotherGame: true } : null)
+                stroke.setNotification('🎉 Session Complete')
+            }
+            return
+        }
+
         if (sessionTime < gamePlan.warmUpEnd) {
             const progress = sessionTime / gamePlan.warmUpEnd
             const targetSpeed = config.strokeSpeedMin + ((config.strokeSpeedMax - config.strokeSpeedMin) * 0.5) * progress
             stroke.setStrokeSpeed(Math.max(config.strokeSpeedMin, targetSpeed))
         }
-        // Phase 2: MIDDLE EVENT PHASE (10% to 90% of total time) - handle scheduled events
         else if (sessionTime >= gamePlan.warmUpEnd && sessionTime < gamePlan.middleEnd) {
             const nextEvent = gamePlan.events[gamePlan.nextEventIndex]
             if (nextEvent && sessionTime >= nextEvent.time) {
                 if (nextEvent.type === 'edge') stroke.triggerEdge()
                 if (nextEvent.type === 'ruin') stroke.triggerRuin()
-
                 setGamePlan(prev => prev ? { ...prev, nextEventIndex: prev.nextEventIndex + 1 } : null)
             }
         }
-        // Phase 3: FINALE PHASE (Last 10% of total time) - ramp to max speed
         else if (sessionTime >= gamePlan.middleEnd && sessionTime < gamePlan.durationSeconds) {
             const finaleDuration = gamePlan.durationSeconds - gamePlan.middleEnd
             const progressInFinale = (sessionTime - gamePlan.middleEnd) / finaleDuration
-
-            // Linear ramp from whatever speed it settled on up to Max speed
             const currentSpeed = stroke.strokeSpeed
             const targetSpeed = currentSpeed + (config.strokeSpeedMax - currentSpeed) * progressInFinale
             stroke.setStrokeSpeed(Math.min(config.strokeSpeedMax, Math.max(config.strokeSpeedMin, targetSpeed)))
         }
 
-        // EXACT moment of finale
         if (sessionTime === gamePlan.durationSeconds && !gamePlan.finaleTriggered) {
             setGamePlan(prev => prev ? { ...prev, finaleTriggered: true } : null)
             if (gamePlan.finaleType === 'orgasm') {
@@ -186,47 +266,36 @@ export default function GamePage() {
                 stroke.setNotification('⛔ DENIED! Hands off.')
                 stroke.setStrokeSpeed(0)
             } else if (gamePlan.finaleType === 'ruined') {
-                stroke.triggerRuin() // Uses the ruin mechanic
-                setTimeout(() => {
-                    stroke.setNotification('💀 RUINED.')
-                }, 15000)
+                stroke.triggerRuin()
+                setTimeout(() => { stroke.setNotification('💀 RUINED.') }, 15000)
             }
         }
 
-        // Phase 4: POST-FINALE TAPER (Next 1/3 of total time)
         if (gamePlan.finaleTriggered && sessionTime > gamePlan.durationSeconds && sessionTime < gamePlan.durationSeconds + gamePlan.taperDuration) {
             const timeInTaper = sessionTime - gamePlan.durationSeconds
             const taperProgress = timeInTaper / gamePlan.taperDuration
-
-            // Wait 15s to let the orgasm/ruin/denied notification process
             if (timeInTaper > 15) {
                 const midSpeed = config.strokeSpeedMin + ((config.strokeSpeedMax - config.strokeSpeedMin) * 0.5)
-
                 if (gamePlan.finaleType === 'orgasm') {
-                    // Start from max speed and slowly taper down to mid speed
                     const speed = config.strokeSpeedMax - ((config.strokeSpeedMax - midSpeed) * taperProgress)
                     stroke.setStrokeSpeed(speed)
                 } else if (!stroke.isPaused && stroke.strokeSpeed === 0) {
-                    // For denied/ruined, resume stroking slowly to mid speed
                     stroke.setPhase('stroking')
                     stroke.setStrokeSpeed(midSpeed)
                 } else {
-                    // Keep stroker going
                     stroke.setStrokeSpeed(midSpeed)
                     if (stroke.phase !== 'stroking') stroke.setPhase('stroking')
                 }
             }
         }
 
-        // Game fully ends, show Another Game button
         if (gamePlan.finaleTriggered && sessionTime >= gamePlan.durationSeconds + gamePlan.taperDuration && !gamePlan.showAnotherGame) {
             setGamePlan(prev => prev ? { ...prev, showAnotherGame: true } : null)
             stroke.setNotification('🎉 Session Complete')
-            // Don't pause! Let video and strokes keep going at mid speed!
         }
     }, [sessionTime, hasStarted, gamePlan, config])
 
-    const togglePlay = () => {
+    const togglePlay = useCallback(() => {
         if (isPlaying) {
             pause()
             pauseStrokes()
@@ -234,7 +303,85 @@ export default function GamePage() {
             resume()
             resumeStrokes()
         }
-    }
+    }, [isPlaying, pause, resume, pauseStrokes, resumeStrokes])
+
+    const toggleFullscreen = useCallback(() => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen()
+        } else {
+            document.documentElement.requestFullscreen()
+        }
+    }, [])
+
+    const toggleDiscreet = useCallback(() => {
+        setDiscreetMode(prev => !prev)
+    }, [])
+
+    // ── KEYBOARD SHORTCUTS ──
+    useEffect(() => {
+        if (!hasStarted) return
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Don't intercept if user is typing in an input
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+
+            switch (e.key.toLowerCase()) {
+                case 'p':
+                case ' ': // Spacebar
+                    e.preventDefault()
+                    togglePlay()
+                    break
+                case 'e':
+                    e.preventDefault()
+                    if (!isActionInProgress) triggerEdge()
+                    break
+                case 'r':
+                    e.preventDefault()
+                    if (!isActionInProgress) triggerRuin()
+                    break
+                case 'arrowright':
+                    e.preventDefault()
+                    advance()
+                    break
+                case 'arrowleft':
+                    e.preventDefault()
+                    goBack()
+                    break
+                case 'f':
+                    e.preventDefault()
+                    toggleFullscreen()
+                    break
+                case 'd':
+                    e.preventDefault()
+                    toggleDiscreet()
+                    break
+                case 'm':
+                    e.preventDefault()
+                    toggleMetronome()
+                    break
+                case 'h':
+                    e.preventDefault()
+                    setShowHistory(prev => !prev)
+                    break
+                case 's':
+                    e.preventDefault()
+                    setIsSidebarOpen(prev => !prev)
+                    break
+                case 'escape':
+                    e.preventDefault()
+                    setShowHotkeys(false)
+                    setIsSidebarOpen(false)
+                    break
+                case '?':
+                    e.preventDefault()
+                    setShowHotkeys(prev => !prev)
+                    break
+            }
+        }
+
+        window.addEventListener('keydown', handleKeyDown)
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [hasStarted, togglePlay, isActionInProgress, triggerEdge, triggerRuin, advance, goBack, toggleFullscreen, toggleDiscreet, toggleMetronome])
 
     return (
         <div style={{
@@ -257,14 +404,13 @@ export default function GamePage() {
                         resume()
 
                         audioEngine.initialize().then(() => {
-                            // Intro Sequence
                             audioEngine.playVoice('intro')
                             setTimeout(() => audioEngine.playVoice('setup'), 5000)
                             setTimeout(() => audioEngine.playVoice('rules'), 12000)
                         })
 
                         triggerVideoPlay?.()
-
+                        addToHistory('Session started', 'system')
 
                         // GENERATE GAME PLAN
                         const durationMins = config.gameDurationMin + (Math.random() * (config.gameDurationMax - config.gameDurationMin))
@@ -273,8 +419,8 @@ export default function GamePage() {
                         const middlePhaseEnd = Math.floor(durationSec * 0.9)
                         const taperD = Math.floor(durationSec / 3)
 
-                        const numEdges = Math.floor(config.edgesMin + Math.random() * (config.edgesMax - config.edgesMin + 1))
-                        const numRuins = Math.floor(config.ruinedOrgasmsMin + Math.random() * (config.ruinedOrgasmsMax - config.ruinedOrgasmsMin + 1))
+                        const numEdges = config.spicyMode ? Math.floor(config.edgesMin + Math.random() * (config.edgesMax - config.edgesMin + 1)) : 0
+                        const numRuins = config.spicyMode ? Math.floor(config.ruinedOrgasmsMin + Math.random() * (config.ruinedOrgasmsMax - config.ruinedOrgasmsMin + 1)) : 0
 
                         const events: { type: 'edge' | 'ruin'; time: number }[] = []
                         for (let i = 0; i < numEdges; i++) {
@@ -283,17 +429,14 @@ export default function GamePage() {
                         for (let i = 0; i < numRuins; i++) {
                             events.push({ type: 'ruin', time: warmUpPhaseEnd + Math.random() * (middlePhaseEnd - warmUpPhaseEnd) })
                         }
-                        events.sort((a, b) => a.time - b.time) // Chronological order
+                        events.sort((a, b) => a.time - b.time)
 
                         const rn = Math.random() * 100
-                        const pO = config.finaleOrgasmProb
-                        const pD = config.finaleDeniedProb
+                        const pO = config.spicyMode ? config.finaleOrgasmProb : 100
+                        const pD = config.spicyMode ? config.finaleDeniedProb : 0
                         let fType: 'orgasm' | 'denied' | 'ruined' = 'orgasm'
-                        if (rn > pO && rn <= pO + pD) {
-                            fType = 'denied'
-                        } else if (rn > pO + pD) {
-                            fType = 'ruined'
-                        }
+                        if (rn > pO && rn <= pO + pD) fType = 'denied'
+                        else if (rn > pO + pD) fType = 'ruined'
 
                         setGamePlan({
                             durationSeconds: durationSec,
@@ -307,190 +450,363 @@ export default function GamePage() {
                             showAnotherGame: false
                         })
 
-                        // Start the stroke engine at the configured minimum speed
                         setStrokeSpeed(config.strokeSpeedMin)
                         useStrokeStore.getState().setPhase('stroking')
                     }} style={{ fontSize: '1.25rem', padding: '16px 48px' }}>
                         ▶ PLAY
                     </button>
                     <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem' }}>Click to start the session</p>
+                    <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.65rem', marginTop: '8px' }}>
+                        Press <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.6rem' }}>?</kbd> during game for keyboard shortcuts
+                    </p>
                 </div>
             )}
 
-            {/* Top Left Status & Controls Layer */}
-            <div style={{ position: 'absolute', top: '16px', left: '16px', zIndex: 10, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-
-                {/* Header Icon/Nav */}
+            {/* ── DISCREET MODE OVERLAY ── */}
+            {discreetMode && (
                 <div
-                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    onClick={toggleDiscreet}
                     style={{
-                        display: 'flex', alignItems: 'center', gap: '8px', color: 'white', fontSize: '1rem', fontWeight: 600,
-                        marginBottom: '1rem', cursor: 'pointer', alignSelf: 'center', marginLeft: '6rem'
+                        position: 'absolute', inset: 0, zIndex: 100,
+                        background: '#1a1a2e',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        flexDirection: 'column', gap: '12px', cursor: 'pointer',
+                        padding: '1rem',
                     }}
                 >
-                    🚀 Fap Instructor <span style={{ fontSize: '0.7rem' }}>{isSidebarOpen ? '▼' : '▶'}</span>
+                    <div style={{ fontSize: mobile ? '2.5rem' : '3rem' }}>⏸</div>
+                    <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: mobile ? '0.8rem' : '0.85rem', fontWeight: 500, textAlign: 'center' }}>
+                        {mobile ? 'Tap to resume' : 'Paused — Click or press D to resume'}
+                    </p>
                 </div>
+            )}
 
-                {isSidebarOpen && (
-                    <>
-                        {/* Stats */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.9rem' }}>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <span style={{ color: '#e11d48', width: '100px' }}>Elapsed:</span>
-                                <span style={{ color: '#e11d48' }}>{Math.floor(sessionTime / 60)}m {sessionTime % 60}s</span>
-                            </div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <span style={{ color: 'var(--color-text-muted)', width: '100px', fontSize: '0.75rem' }}>Remaining:</span>
-                                <span style={{ color: gameTimeRemaining < 60 ? '#ef4444' : 'var(--color-text-muted)', fontSize: '0.75rem' }}>
-                                    {Math.floor(gameTimeRemaining / 60)}m {gameTimeRemaining % 60}s
-                                </span>
-                            </div>
-                            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Stroke Grip: <span style={{ color: 'var(--color-accent-secondary)' }}>{config.startingGripStrength}</span></p>
-                            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Stroke Style: <span style={{ color: 'var(--color-accent-secondary)' }}>Dominant</span></p>
-                            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Speed: <span style={{ color: 'var(--color-accent-secondary)' }}>{strokeSpeed > 0 ? `${strokeSpeed.toFixed(1)}/s` : 'Stopped'}</span></p>
-                            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Edges: <span style={{ color: '#fbbf24' }}>{edges}</span> | Ruins: <span style={{ color: '#ef4444' }}>{ruins}</span></p>
+            {/* ── TOP TOOLBAR ── */}
+            {hasStarted && !discreetMode && (
+                <div style={{
+                    position: 'absolute', top: mobile ? '4px' : '8px',
+                    left: mobile ? '4px' : '50%',
+                    right: mobile ? '4px' : 'auto',
+                    transform: mobile ? 'none' : 'translateX(-50%)',
+                    zIndex: 15, display: 'flex', gap: mobile ? '2px' : '4px', alignItems: 'center',
+                    background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)',
+                    WebkitBackdropFilter: 'blur(12px)',
+                    padding: mobile ? '3px 4px' : '4px 8px', borderRadius: '10px',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    opacity: mobile ? 0.85 : 0.6,
+                    transition: 'opacity 0.3s',
+                    overflowX: mobile ? 'auto' : 'visible',
+                    WebkitOverflowScrolling: 'touch',
+                    paddingTop: 'env(safe-area-inset-top, 3px)',
+                }}
+                    onMouseEnter={e => { if (!mobile) e.currentTarget.style.opacity = '1' }}
+                    onMouseLeave={e => { if (!mobile) e.currentTarget.style.opacity = '0.6' }}
+                >
+                    <ToolbarBtn icon="⚙️" label="Settings" onClick={() => setIsSidebarOpen(!isSidebarOpen)} hotkey="S" active={isSidebarOpen} compact={mobile} />
+                    {!mobile && <ToolbarBtn icon="⌨️" label="Hotkeys" onClick={() => setShowHotkeys(!showHotkeys)} hotkey="?" active={showHotkeys} />}
+                    {config.spicyMode && <ToolbarBtn icon="📜" label="History" onClick={() => setShowHistory(!showHistory)} hotkey="H" active={showHistory} compact={mobile} />}
+                    <ToolbarBtn icon="👁️" label="Discreet" onClick={toggleDiscreet} hotkey="D" compact={mobile} />
+                    <ToolbarBtn icon="⛶" label="Fullscreen" onClick={toggleFullscreen} hotkey="F" compact={mobile} />
+
+                    {/* Compact media controls */}
+                    <div style={{ display: 'flex', gap: '2px', marginLeft: mobile ? '4px' : '8px', borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: mobile ? '4px' : '8px' }}>
+                        <ToolbarBtn icon="⏮" label="Previous" onClick={goBack} hotkey="←" compact={mobile} />
+                        <ToolbarBtn icon={isPlaying ? '⏸' : '▶'} label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlay} hotkey="P" compact={mobile} />
+                        <ToolbarBtn icon="⏭" label="Next" onClick={advance} hotkey="→" compact={mobile} />
+                    </div>
+                </div>
+            )}
+
+            {/* ── HOTKEYS MODAL ── */}
+            {showHotkeys && (
+                <div
+                    onClick={() => setShowHotkeys(false)}
+                    style={{
+                        position: 'absolute', inset: 0, zIndex: 50,
+                        background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+                        WebkitBackdropFilter: 'blur(8px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                >
+                    <div
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                            background: 'rgba(26, 26, 46, 0.95)', borderRadius: mobile ? '12px' : '16px',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            padding: mobile ? '16px' : '24px 32px',
+                            width: mobile ? '95%' : 'auto',
+                            minWidth: mobile ? 'auto' : '450px',
+                            maxWidth: '500px',
+                            maxHeight: mobile ? '80vh' : 'auto',
+                            overflowY: 'auto',
+                            boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+                        }}
+                    >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'white' }}>⌨️ Keyboard Shortcuts</h3>
+                            <button onClick={() => setShowHotkeys(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
                         </div>
 
-                        {/* Toggles Row 1 */}
-                        <div style={{ display: 'flex', gap: '24px', marginTop: '8px' }}>
-                            <CustomToggle label="Voice" checked={voiceEnabled} onChange={toggleVoice} />
-                            <CustomToggle label="Moans" checked={moansEnabled} onChange={toggleMoans} />
-                            <CustomToggle label="Mute Videos" checked={toggles.muteVideos} onChange={(v) => setToggles({ ...toggles, muteVideos: v })} />
-                        </div>
-
-
-                        {/* Volume Slider */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', paddingLeft: '2px' }}>
-                            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>🔈</span>
-                            <input
-                                type="range"
-                                min="0" max="1" step="0.05"
-                                value={masterVolume}
-                                onChange={(e) => setMasterVolume(parseFloat(e.target.value))}
-                                style={{
-                                    width: '100px', height: '4px', cursor: 'pointer',
-                                    accentColor: 'var(--color-accent-secondary)',
-                                }}
-                            />
-                            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.75rem' }}>🔊</span>
-                        </div>
-
-
-                        {/* Toggles Row 2 */}
-                        <div style={{ display: 'flex', gap: '24px' }}>
-                            <CustomToggle label="Metronome" checked={metronomeEnabled} onChange={toggleMetronome} />
-                            <CustomToggle label="Beat Meter" checked={toggles.beatMeter} onChange={(v) => setToggles({ ...toggles, beatMeter: v })} />
-                        </div>
-
-
-
-                        {/* Beat Style Picker */}
-                        {toggles.beatMeter && (
-                            <div style={{ display: 'flex', gap: '6px', marginTop: '4px', alignItems: 'center' }}>
-                                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.7rem', marginRight: '4px' }}>Style:</span>
+                        <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: mobile ? '16px' : '24px' }}>
+                            <div>
+                                <h4 style={{ fontSize: '0.75rem', color: '#f472b6', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '12px' }}>
+                                    Media Controls
+                                </h4>
                                 {[
-                                    { id: 'dot' as BeatStyle, icon: '⚪', tip: 'Bouncing Dot' },
-                                    { id: 'eggplant' as BeatStyle, icon: '🍆', tip: 'Eggplant' },
-                                    { id: 'pulse' as BeatStyle, icon: '💫', tip: 'Pulse Ring' },
-                                    { id: 'wave' as BeatStyle, icon: '🌊', tip: 'Wave' },
-                                ].map((s) => (
-                                    <button
-                                        key={s.id}
-                                        onClick={() => setBeatStyle(s.id)}
-                                        title={s.tip}
-                                        style={{
-                                            background: beatStyle === s.id ? 'rgba(255,255,255,0.15)' : 'transparent',
-                                            border: beatStyle === s.id ? '1px solid rgba(255,255,255,0.3)' : '1px solid transparent',
-                                            borderRadius: '6px', padding: '4px 8px', cursor: 'pointer',
-                                            fontSize: '1rem', lineHeight: 1,
-                                            transition: 'all 0.15s',
-                                        }}
-                                    >
-                                        {s.icon}
-                                    </button>
+                                    ['→', 'Next slide'],
+                                    ['←', 'Previous slide'],
+                                    ['P / Space', 'Pause / Resume'],
+                                    ['F', 'Toggle fullscreen'],
+                                    ['D', 'Discreet mode'],
+                                    ['M', 'Toggle metronome'],
+                                ].map(([key, desc]) => (
+                                    <div key={key} style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '8px' }}>
+                                        <kbd style={{
+                                            background: 'rgba(255,255,255,0.1)', padding: '3px 8px', borderRadius: '4px',
+                                            fontSize: '0.7rem', fontFamily: 'var(--font-mono)', color: '#a78bfa',
+                                            border: '1px solid rgba(255,255,255,0.1)', minWidth: '32px', textAlign: 'center',
+                                        }}>{key}</kbd>
+                                        <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)' }}>{desc}</span>
+                                    </div>
                                 ))}
                             </div>
+                            <div>
+                                <h4 style={{ fontSize: '0.75rem', color: '#f472b6', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '12px' }}>
+                                    Game Controls
+                                </h4>
+                                {[
+                                    ['E', 'Trigger edge'],
+                                    ['R', 'Trigger ruin'],
+                                    ['S', 'Toggle settings'],
+                                    ['H', 'Toggle history'],
+                                    ['?', 'Show hotkeys'],
+                                    ['Esc', 'Close panels'],
+                                ].map(([key, desc]) => (
+                                    <div key={key} style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '8px' }}>
+                                        <kbd style={{
+                                            background: 'rgba(255,255,255,0.1)', padding: '3px 8px', borderRadius: '4px',
+                                            fontSize: '0.7rem', fontFamily: 'var(--font-mono)', color: '#a78bfa',
+                                            border: '1px solid rgba(255,255,255,0.1)', minWidth: '32px', textAlign: 'center',
+                                        }}>{key}</kbd>
+                                        <span style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)' }}>{desc}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── LEFT PANEL: Status HUD ── */}
+            {hasStarted && !discreetMode && (
+                <div style={{
+                    position: 'absolute',
+                    top: mobile ? '44px' : '52px',
+                    left: mobile ? '4px' : '16px',
+                    zIndex: 10, display: 'flex', flexDirection: 'column', gap: mobile ? '6px' : '12px',
+                    paddingTop: 'env(safe-area-inset-top, 0)',
+                }}>
+                    {/* Compact Status HUD (always visible) */}
+                    <div style={{
+                        background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)',
+                        WebkitBackdropFilter: 'blur(10px)',
+                        borderRadius: '10px', padding: '8px 12px',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)',
+                        display: 'flex', flexDirection: 'column', gap: '2px',
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
+                            <span>Time:</span>
+                            <span style={{ color: '#e11d48', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                                {String(Math.floor(sessionTime / 60)).padStart(2, '0')}:{String(sessionTime % 60).padStart(2, '0')}
+                            </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
+                            <span>Remaining:</span>
+                            <span style={{ color: gameTimeRemaining < 60 ? '#ef4444' : 'rgba(255,255,255,0.5)', fontFamily: 'var(--font-mono)', fontSize: '0.65rem' }}>
+                                {Math.floor(gameTimeRemaining / 60)}m {gameTimeRemaining % 60}s
+                            </span>
+                        </div>
+                        {config.spicyMode && (
+                            <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
+                                    <span>Hand:</span>
+                                    <span style={{ color: 'var(--color-accent-secondary)' }}>dominant</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
+                                    <span>Grip:</span>
+                                    <span style={{ color: 'var(--color-accent-secondary)' }}>{config.startingGripStrength.toLowerCase()}</span>
+                                </div>
+                            </>
                         )}
-
-                        {/* Action Buttons */}
-                        <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
-                            <button
-                                onClick={triggerRuin}
-                                disabled={isActionInProgress}
-                                style={{
-                                    background: phase === 'ruin_buildup' || phase === 'ruined' ? '#dc2626' : '#3730a3',
-                                    color: 'white', border: 'none', borderRadius: '4px',
-                                    padding: '8px 24px', fontSize: '0.85rem', fontWeight: 'bold',
-                                    cursor: isActionInProgress ? 'not-allowed' : 'pointer',
-                                    opacity: isActionInProgress ? 0.5 : 1,
-                                    transition: 'all 0.2s',
-                                }}
-                            >
-                                RUIN {ruins > 0 && `(${ruins})`}
-                            </button>
-                            <button
-                                onClick={triggerEdge}
-                                disabled={isActionInProgress}
-                                style={{
-                                    background: phase === 'edge_buildup' || phase === 'riding_edge' ? '#d97706' : '#9ca3af',
-                                    color: phase === 'edge_buildup' || phase === 'riding_edge' ? 'white' : 'black',
-                                    border: 'none', borderRadius: '4px',
-                                    padding: '8px 24px', fontSize: '0.85rem', fontWeight: 'bold',
-                                    cursor: isActionInProgress ? 'not-allowed' : 'pointer',
-                                    opacity: isActionInProgress ? 0.5 : 1,
-                                    transition: 'all 0.2s',
-                                }}
-                            >
-                                EDGE {edges > 0 && `(${edges})`}
-                            </button>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
+                            <span>Speed:</span>
+                            <span style={{ color: 'var(--color-accent-secondary)', fontFamily: 'var(--font-mono)' }}>
+                                {strokeSpeed > 0 ? `${strokeSpeed.toFixed(1)}/s` : 'Stopped'}
+                            </span>
                         </div>
+                    </div>
 
-                        {/* Media Control Icons */}
-                        <div style={{ display: 'flex', gap: '24px', marginTop: '24px', paddingLeft: '24px' }}>
-                            <span onClick={goBack} style={{ color: 'white', fontSize: '1.25rem', cursor: 'pointer' }} title="Previous video">⏮</span>
-                            <span onClick={togglePlay} style={{ color: 'white', fontSize: '1.25rem', cursor: 'pointer' }} title={isPlaying ? 'Pause' : 'Play'}>{isPlaying ? '⏸' : '▶'}</span>
-                            <span onClick={advance} style={{ color: 'white', fontSize: '1.25rem', cursor: 'pointer' }} title="Next video">⏭</span>
-                            <span onClick={() => {
-                                if (document.fullscreenElement) {
-                                    document.exitFullscreen()
-                                } else {
-                                    document.documentElement.requestFullscreen()
-                                }
-                            }} style={{ color: 'white', fontSize: '1.25rem', cursor: 'pointer' }} title="Fullscreen">⛶</span>
+                    {/* Action Buttons (Edge / Ruin) */}
+                    <div style={{ display: 'flex', gap: mobile ? '6px' : '8px' }}>
+                        <button
+                            onClick={togglePlay}
+                            style={{
+                                width: mobile ? '44px' : '38px', height: mobile ? '44px' : '38px', borderRadius: '50%',
+                                background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                                color: 'white', fontSize: mobile ? '1rem' : '0.9rem', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.2s',
+                            }}
+                            title={`${isPlaying ? 'Pause' : 'Play'} (P)`}
+                        >
+                            {isPlaying ? '⏸' : '▶'}
+                        </button>
+                        {config.spicyMode && (
+                            <>
+                                <button
+                                    onClick={() => !isActionInProgress && triggerEdge()}
+                                    disabled={isActionInProgress}
+                                    style={{
+                                        width: mobile ? '44px' : '38px', height: mobile ? '44px' : '38px', borderRadius: '50%',
+                                        background: phase.includes('edge') ? 'rgba(251, 191, 36, 0.3)' : 'rgba(255,255,255,0.1)',
+                                        border: `1px solid ${phase.includes('edge') ? 'rgba(251, 191, 36, 0.5)' : 'rgba(255,255,255,0.2)'}`,
+                                        color: phase.includes('edge') ? '#fbbf24' : 'white',
+                                        fontSize: mobile ? '0.75rem' : '0.65rem', cursor: isActionInProgress ? 'not-allowed' : 'pointer',
+                                        opacity: isActionInProgress ? 0.4 : 1,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontWeight: 700, transition: 'all 0.2s',
+                                    }}
+                                    title="Edge (E)"
+                                >
+                                    E{edges > 0 ? <sup style={{ fontSize: '0.5rem' }}>{edges}</sup> : null}
+                                </button>
+                                <button
+                                    onClick={() => !isActionInProgress && triggerRuin()}
+                                    disabled={isActionInProgress}
+                                    style={{
+                                        width: mobile ? '44px' : '38px', height: mobile ? '44px' : '38px', borderRadius: '50%',
+                                        background: phase.includes('ruin') ? 'rgba(239, 68, 68, 0.3)' : 'rgba(255,255,255,0.1)',
+                                        border: `1px solid ${phase.includes('ruin') ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255,255,255,0.2)'}`,
+                                        color: phase.includes('ruin') ? '#ef4444' : 'white',
+                                        fontSize: mobile ? '0.75rem' : '0.65rem', cursor: isActionInProgress ? 'not-allowed' : 'pointer',
+                                        opacity: isActionInProgress ? 0.4 : 1,
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        fontWeight: 700, transition: 'all 0.2s',
+                                    }}
+                                    title="Ruin (R)"
+                                >
+                                    R{ruins > 0 ? <sup style={{ fontSize: '0.5rem' }}>{ruins}</sup> : null}
+                                </button>
+                            </>
+                        )}
+                    </div>
+
+                    {/* Settings Panel (expandable) */}
+                    {isSidebarOpen && (
+                        <div style={{
+                            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)',
+                            WebkitBackdropFilter: 'blur(12px)',
+                            borderRadius: '10px', padding: '12px',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            display: 'flex', flexDirection: 'column', gap: '12px',
+                            maxWidth: '260px',
+                        }}>
+                            <h4 style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '4px' }}>
+                                Audio & Display
+                            </h4>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                <CustomToggle label="Voice" checked={voiceEnabled} onChange={toggleVoice} />
+                                <CustomToggle label="Moans" checked={moansEnabled} onChange={toggleMoans} />
+                                <CustomToggle label="Metronome" checked={metronomeEnabled} onChange={toggleMetronome} />
+                                <CustomToggle label="Mute Videos" checked={toggles.muteVideos} onChange={(v) => setToggles({ ...toggles, muteVideos: v })} />
+                                <CustomToggle label="Beat Meter" checked={toggles.beatMeter} onChange={(v) => setToggles({ ...toggles, beatMeter: v })} />
+                            </div>
+
+                            {/* Volume Slider */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem' }}>🔈</span>
+                                <input
+                                    type="range" min="0" max="1" step="0.05"
+                                    value={masterVolume}
+                                    onChange={(e) => setMasterVolume(parseFloat(e.target.value))}
+                                    style={{ width: '100%', height: '4px', cursor: 'pointer', accentColor: 'var(--color-accent-secondary)' }}
+                                />
+                                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem' }}>🔊</span>
+                            </div>
+
+                            {/* Beat Style Picker */}
+                            {toggles.beatMeter && (
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                    <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.7rem', marginRight: '4px' }}>Style:</span>
+                                    {[
+                                        { id: 'dot' as BeatStyle, icon: '⚪', tip: 'Bouncing Dot' },
+                                        { id: 'eggplant' as BeatStyle, icon: '🍆', tip: 'Eggplant' },
+                                        { id: 'pulse' as BeatStyle, icon: '💫', tip: 'Pulse Ring' },
+                                        { id: 'wave' as BeatStyle, icon: '🌊', tip: 'Wave' },
+                                    ].map((s) => (
+                                        <button
+                                            key={s.id}
+                                            onClick={() => setBeatStyle(s.id)}
+                                            title={s.tip}
+                                            style={{
+                                                background: beatStyle === s.id ? 'rgba(255,255,255,0.15)' : 'transparent',
+                                                border: beatStyle === s.id ? '1px solid rgba(255,255,255,0.3)' : '1px solid transparent',
+                                                borderRadius: '6px', padding: '4px 8px', cursor: 'pointer',
+                                                fontSize: '1rem', lineHeight: 1, transition: 'all 0.15s',
+                                            }}
+                                        >
+                                            {s.icon}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
-                    </>
-                )}
-            </div>
+                    )}
+                </div>
+            )}
 
-            {/* Top Right Area: Task Display — 50% opacity when waiting, full when active */}
-            <div style={{
-                position: 'absolute', top: '16px', right: '16px',
-                zIndex: 10, width: '180px',
-                opacity: 0.5,
-                transition: 'opacity 0.3s ease',
-            }}
-                onMouseEnter={e => { if (e.currentTarget) e.currentTarget.style.opacity = '1' }}
-                onMouseLeave={e => { if (e.currentTarget) e.currentTarget.style.opacity = '0.5' }}
-                onTouchStart={e => { if (e.currentTarget) e.currentTarget.style.opacity = '1' }}
-                onTouchEnd={e => {
-                    const target = e.currentTarget;
-                    setTimeout(() => { if (target) target.style.opacity = '0.5' }, 2000)
+            {/* ── RIGHT PANEL: Task + History ── */}
+            {hasStarted && !discreetMode && config.spicyMode && (
+                <div style={{
+                    position: 'absolute',
+                    top: mobile ? 'auto' : '52px',
+                    bottom: mobile ? '70px' : 'auto',
+                    right: mobile ? '4px' : '16px',
+                    zIndex: 10,
+                    width: mobile ? '180px' : '220px',
+                    display: 'flex', flexDirection: 'column', gap: '8px',
+                    opacity: mobile ? 0.75 : 0.6,
+                    transition: 'opacity 0.3s ease',
+                    maxHeight: mobile ? '40vh' : 'auto',
+                    overflowY: mobile ? 'auto' : 'visible',
                 }}
-            >
-                <TaskDisplay />
-            </div>
+                    onMouseEnter={e => { if (!mobile) e.currentTarget.style.opacity = '1' }}
+                    onMouseLeave={e => { if (!mobile) e.currentTarget.style.opacity = '0.6' }}
+                    onTouchStart={e => { e.currentTarget.style.opacity = '1' }}
+                    onTouchEnd={e => {
+                        const target = e.currentTarget;
+                        setTimeout(() => { if (target) target.style.opacity = mobile ? '0.75' : '0.6' }, 2000)
+                    }}
+                >
+                    <TaskDisplay />
+                    <InstructionHistory entries={instructionHistory} visible={showHistory} />
+                </div>
+            )}
 
             {/* Stroke notification overlay */}
-            {notification && hasStarted && (
+            {notification && hasStarted && !discreetMode && (
                 <div style={{
-                    position: 'absolute', bottom: '100px', left: '50%', transform: 'translateX(-50%)',
+                    position: 'absolute', bottom: mobile ? '80px' : '100px', left: '50%', transform: 'translateX(-50%)',
                     zIndex: 15, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)',
-                    padding: '12px 32px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)',
+                    padding: mobile ? '8px 20px' : '12px 32px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)',
                     pointerEvents: 'none',
+                    maxWidth: mobile ? '90%' : 'auto',
                 }}>
                     <p style={{
                         color: phase.includes('ruin') ? '#ef4444' : phase.includes('edge') ? '#fbbf24' : 'white',
-                        fontSize: '1.1rem', fontWeight: 'bold', textAlign: 'center', margin: 0,
+                        fontSize: mobile ? '0.9rem' : '1.1rem', fontWeight: 'bold', textAlign: 'center', margin: 0,
                         textShadow: '0 0 20px currentColor'
                     }}>
                         {notification}
@@ -499,21 +815,26 @@ export default function GamePage() {
             )}
 
             {/* End Game Overlay */}
-            {gamePlan?.showAnotherGame && (
+            {gamePlan?.showAnotherGame && !discreetMode && (
                 <div style={{
-                    position: 'absolute', bottom: '32px', right: '32px', zIndex: 100,
+                    position: 'absolute', bottom: mobile ? '16px' : '32px',
+                    left: mobile ? '16px' : 'auto',
+                    right: mobile ? '16px' : '32px',
+                    zIndex: 100,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                     <button className="btn-glow animate-pulse-glow" onClick={() => {
-                        window.location.href = '/' // Quick way to wipe state and return home
-                    }} style={{ fontSize: '1.25rem', padding: '16px 48px' }}>
+                        window.location.href = '/'
+                    }} style={{ fontSize: mobile ? '1rem' : '1.25rem', padding: mobile ? '14px 32px' : '16px 48px', width: mobile ? '100%' : 'auto' }}>
                         Another Game
                     </button>
                 </div>
             )}
 
             {/* Beat Meter */}
-            <BeatMeter enabled={hasStarted} metronomeEnabled={metronomeEnabled && hasStarted} style={beatStyle} />
+            {!discreetMode && (
+                <BeatMeter enabled={hasStarted && toggles.beatMeter} metronomeEnabled={metronomeEnabled && hasStarted} style={beatStyle} />
+            )}
 
         </div>
     )
