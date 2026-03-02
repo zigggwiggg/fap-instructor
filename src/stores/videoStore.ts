@@ -116,16 +116,11 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                     if (!useSD && !g.urls.hd) continue
                     if (useSD && !g.urls.sd && !g.urls.hd) continue
 
+
                     const videoTags = (g.tags || []).map((t: string) => t.toLowerCase())
 
-                    // Tag matching: strict for known niches, relaxed for custom
-                    if (!isCustomTag) {
-                        const tagLower = searchTag.toLowerCase().replace(/[-_]/g, ' ')
-                        const videoNiches = (g.niches || []).map((n: string) => n.toLowerCase().replace(/[-_]/g, ' '))
-                        const hasMatchingTag = videoTags.some(t => t.includes(tagLower) || tagLower.includes(t))
-                        const hasMatchingNiche = videoNiches.some(n => n.includes(tagLower) || tagLower.includes(n))
-                        if (!hasMatchingTag && !hasMatchingNiche) continue
-                    }
+                    // Tag matching is not needed here — we're fetching from the exact niche endpoint
+                    // which already guarantees relevant content
 
                     // Orientation filtering
                     const gTags = videoTags
