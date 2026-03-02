@@ -2,7 +2,7 @@
 
 import { create } from 'zustand'
 import type { VideoItem } from '../types'
-import { searchGifs } from '../services/redgifs'
+import { searchGifs, fetchByNiche } from '../services/redgifs'
 import { useConfigStore } from './configStore'
 import { shouldUseSD, getPerNicheCount, getConnectionQuality } from '../utils/network'
 
@@ -89,15 +89,22 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 if (!fetchTags.some(t => t.includes('lesbian'))) fetchTags.unshift('lesbian')
             }
 
-            // Fetch each tag: exclusively use search API, because custom tags break the niche endpoint
+            // Fetch each tag: try the accurate niche endpoint first, fall back to text search
             for (let i = 0; i < fetchTags.length; i++) {
                 const tag = fetchTags[i]
                 try {
-                    const r = await searchGifs([tag], currentPage, perNiche)
+                    // 1) Try the accurate niche endpoint first (e.g. /v2/niches/feet/gifs)
+                    let r = await fetchByNiche(tag, currentPage, perNiche)
+
+                    // 2) If niche endpoint returned nothing, fall back to text search
+                    if (!r?.gifs || r.gifs.length === 0) {
+                        console.log(`[VideoStore] Niche "${tag}" returned 0 results, falling back to search`)
+                        r = await searchGifs([tag], currentPage, perNiche)
+                    }
+
                     if (r?.gifs) {
                         allResults.push(...r.gifs.map(g => ({ gif: g, searchTag: tag })))
                     }
-
                     // Wait 1 second between API calls to prevent 429 errors
                     if (i < fetchTags.length - 1) {
                         await new Promise(resolve => setTimeout(resolve, 1000))
@@ -107,8 +114,8 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 }
             }
 
-            // Filter for quality and orientation
-            const filtered = allResults.filter(({ gif: g }) => {
+            // Filter for quality, orientation, AND strict tag matching
+            const filtered = allResults.filter(({ gif: g, searchTag }) => {
                 if (g.views && g.views < 100) return false
                 if (g.type === 2) return false  // skip images
                 if (g.duration && g.duration < 4) return false
@@ -117,10 +124,16 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 if (!useSD && !g.urls.hd) return false
                 if (useSD && !g.urls.sd && !g.urls.hd) return false
 
+                // ── STRICT TAG MATCHING ──
+                // The video must actually contain the user's selected tag in its tags or niches.
+                const tagLower = searchTag.toLowerCase().replace(/[-_]/g, ' ')
                 const videoTags = (g.tags || []).map((t: string) => t.toLowerCase())
-                // We rely entirely on the RedGifs search algorithm to provide relevant videos.
-                // Doing strict string matching against client-side tags causes false negatives 
-                // for perfectly valid searches (like "footjob").
+                const videoNiches = (g.niches || []).map((n: string) => n.toLowerCase().replace(/[-_]/g, ' '))
+                const hasMatchingTag = videoTags.some(t => t.includes(tagLower) || tagLower.includes(t))
+                const hasMatchingNiche = videoNiches.some(n => n.includes(tagLower) || tagLower.includes(n))
+                if (!hasMatchingTag && !hasMatchingNiche) {
+                    return false
+                }
 
                 // Orientation filtering
                 const gTags = videoTags
