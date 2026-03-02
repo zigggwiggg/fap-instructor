@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useConfigStore } from '../stores/configStore'
 import { fetchNiches, type RedGifsNiche } from '../services/redgifs'
 
@@ -60,6 +60,30 @@ export default function LandingPage() {
     const [nichesError, setNichesError] = useState('')
     const [nicheSearch, setNicheSearch] = useState('')
 
+    // Generate combined and sorted niches list for display
+    const combinedNiches = useMemo(() => {
+        const base = [...niches]
+        const existingNames = new Set(base.map(n => n.name.toLowerCase()))
+
+        // Add custom tags that aren't in the default fetched list
+        config.tags.forEach(tag => {
+            const lowerTag = tag.toLowerCase()
+            if (!existingNames.has(lowerTag)) {
+                base.push({ name: lowerTag, gifs: 0, subscribers: 0, thumbnail: '' })
+                existingNames.add(lowerTag)
+            }
+        })
+
+        // Sort: Selected tags first, then alphabetically
+        return base.sort((a, b) => {
+            const aSelected = config.tags.includes(a.name.toLowerCase())
+            const bSelected = config.tags.includes(b.name.toLowerCase())
+            if (aSelected && !bSelected) return -1
+            if (!aSelected && bSelected) return 1
+            return a.name.localeCompare(b.name)
+        })
+    }, [niches, config.tags])
+
     // Fetch categories on mount
     useEffect(() => {
         setNichesLoading(true)
@@ -85,9 +109,19 @@ export default function LandingPage() {
     }
 
     const handleStart = () => {
-        // Just use config.tags directly
-        const allTags = [...new Set(config.tags)]
-        updateConfig({ tags: allTags.length > 0 ? allTags : ['nsfw'] })
+        let allTags = [...new Set(config.tags)]
+
+        // If user picked no tags, pick 5 random tags from the available list
+        if (allTags.length === 0) {
+            if (niches.length > 0) {
+                const shuffled = [...niches].sort(() => 0.5 - Math.random())
+                allTags = shuffled.slice(0, 5).map(n => n.name.toLowerCase())
+            } else {
+                allTags = ['nsfw'] // ultimate fallback
+            }
+        }
+
+        updateConfig({ tags: allTags })
         navigate('/play')
     }
 
@@ -272,7 +306,7 @@ export default function LandingPage() {
                                 />
                                 <button
                                     onClick={() => {
-                                        const visible = niches.filter((n) => n.name.toLowerCase().includes(nicheSearch.toLowerCase()))
+                                        const visible = combinedNiches.filter((n) => n.name.toLowerCase().includes(nicheSearch.toLowerCase()))
                                         const visibleTags = visible.map((n) => n.name.toLowerCase())
                                         const allSelected = visibleTags.every((t) => config.tags.includes(t))
                                         if (allSelected) {
@@ -287,12 +321,12 @@ export default function LandingPage() {
                                     }}
                                     style={{
                                         padding: '5px 12px', fontSize: '0.7rem', fontWeight: 600,
-                                        background: 'rgba(139, 92, 246, 0.2)', color: 'var(--color-accent)',
-                                        border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '4px',
+                                        background: 'rgba(225, 29, 72, 0.2)', color: 'var(--color-accent)',
+                                        border: '1px solid rgba(225, 29, 72, 0.3)', borderRadius: '4px',
                                         cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.15s',
                                     }}
                                 >
-                                    {niches.filter((n) => n.name.toLowerCase().includes(nicheSearch.toLowerCase())).every((n) => config.tags.includes(n.name.toLowerCase()))
+                                    {combinedNiches.filter((n) => n.name.toLowerCase().includes(nicheSearch.toLowerCase())).every((n) => config.tags.includes(n.name.toLowerCase()))
                                         ? 'Clear All' : 'Select All'}
                                 </button>
                             </div>
@@ -304,7 +338,7 @@ export default function LandingPage() {
                             }}>
                                 {nichesLoading && <p style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem', gridColumn: '1 / -1' }}>Loading categories...</p>}
                                 {nichesError && <p style={{ color: 'var(--color-danger)', fontSize: '0.8rem', gridColumn: '1 / -1' }}>Error: {nichesError}</p>}
-                                {niches
+                                {combinedNiches
                                     .filter((n) => n.name.toLowerCase().includes(nicheSearch.toLowerCase()))
                                     .map((niche) => {
                                         const isSelected = config.tags.includes(niche.name.toLowerCase())
@@ -314,7 +348,7 @@ export default function LandingPage() {
                                                 style={{
                                                     display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer',
                                                     fontSize: '0.8rem', padding: '4px 6px', borderRadius: '4px',
-                                                    background: isSelected ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+                                                    background: isSelected ? 'rgba(225, 29, 72, 0.15)' : 'transparent',
                                                     color: isSelected ? 'var(--color-accent)' : 'var(--color-text-muted)',
                                                     transition: 'all 0.15s',
                                                 }}

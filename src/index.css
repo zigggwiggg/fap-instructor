@@ -2,19 +2,19 @@
 
 /* ── Design Tokens ── */
 :root {
-  --color-bg-primary: #0a0a0f;
-  --color-bg-secondary: #12121a;
-  --color-bg-card: #1a1a2e;
-  --color-bg-card-hover: #232340;
-  --color-bg-glass: rgba(26, 26, 46, 0.6);
-  --color-border: rgba(255, 255, 255, 0.06);
-  --color-border-active: rgba(139, 92, 246, 0.4);
+  --color-bg-primary: #050505;
+  --color-bg-secondary: #0a0a0a;
+  --color-bg-card: #111111;
+  --color-bg-card-hover: #1a1a1a;
+  --color-bg-glass: rgba(10, 10, 10, 0.6);
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-active: rgba(225, 29, 72, 0.4);
 
-  --color-accent: #8b5cf6;
-  --color-accent-hover: #a78bfa;
-  --color-accent-glow: rgba(139, 92, 246, 0.25);
-  --color-accent-secondary: #f472b6;
-  --color-accent-tertiary: #06b6d4;
+  --color-accent: #e11d48;
+  --color-accent-hover: #f43f5e;
+  --color-accent-glow: rgba(225, 29, 72, 0.25);
+  --color-accent-secondary: #9f1239;
+  --color-accent-tertiary: #fb7185;
   --color-success: #34d399;
   --color-warning: #fbbf24;
   --color-danger: #f87171;
@@ -94,7 +94,7 @@ body {
 
 /* ── Glow Accent Button ── */
 .btn-glow {
-  background: linear-gradient(135deg, var(--color-accent), #6d28d9);
+  background: linear-gradient(135deg, var(--color-accent), #9f1239);
   color: white;
   font-weight: 600;
   border: none;
@@ -148,7 +148,7 @@ body {
   }
 
   50% {
-    box-shadow: 0 0 40px var(--color-accent-glow), 0 0 80px rgba(139, 92, 246, 0.1);
+    box-shadow: 0 0 40px var(--color-accent-glow), 0 0 80px rgba(225, 29, 72, 0.1);
   }
 }
 
@@ -261,8 +261,8 @@ body {
 
   /* Larger touch targets */
   button,
+  label.touch-target,
   [role="button"],
-  input[type="checkbox"],
   select {
     min-height: 44px;
     min-width: 44px;
