@@ -9,8 +9,6 @@ import BeatMeter, { type BeatStyle } from '../components/BeatMeter'
 import InstructionHistory, { type HistoryEntry } from '../components/InstructionHistory'
 import type { Action } from '../types'
 import { triggerVideoPlay } from '../videoControl'
-import { audioEngine } from '../audioEngine'
-import { useAudioStore } from '../stores/audioStore'
 
 // Responsive hook
 function useIsMobile() {
@@ -111,13 +109,6 @@ export default function GamePage() {
     const [instructionHistory, setInstructionHistory] = useState<HistoryEntry[]>([])
     const [showHistory, setShowHistory] = useState(!mobile) // Hidden by default on mobile
     const historyIdRef = useRef(0)
-
-    const {
-        masterVolume, setMasterVolume,
-        moansEnabled, toggleMoans,
-        voiceEnabled, toggleVoice,
-        metronomeEnabled, toggleMetronome
-    } = useAudioStore()
     const [toggles, setToggles] = useState({ beatMeter: true, muteVideos: false })
 
 
@@ -184,16 +175,7 @@ export default function GamePage() {
         }
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Voice & JOI bindings
-    useEffect(() => {
-        if (!hasStarted || !voiceEnabled || !notification) return
-        audioEngine.playVoice('command')
-    }, [notification, hasStarted, voiceEnabled])
 
-    useEffect(() => {
-        if (!hasStarted || !voiceEnabled || !currentAction) return
-        audioEngine.playVoice('command')
-    }, [currentAction, hasStarted, voiceEnabled])
 
 
     // Session timer (pauses when game is paused)
@@ -355,10 +337,7 @@ export default function GamePage() {
                     e.preventDefault()
                     toggleDiscreet()
                     break
-                case 'm':
-                    e.preventDefault()
-                    toggleMetronome()
-                    break
+
                 case 'h':
                     e.preventDefault()
                     setShowHistory(prev => !prev)
@@ -381,14 +360,14 @@ export default function GamePage() {
 
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [hasStarted, togglePlay, isActionInProgress, triggerEdge, triggerRuin, advance, goBack, toggleFullscreen, toggleDiscreet, toggleMetronome])
+    }, [hasStarted, togglePlay, isActionInProgress, triggerEdge, triggerRuin, advance, goBack, toggleFullscreen, toggleDiscreet])
 
     return (
         <div style={{
             position: 'fixed', inset: 0, backgroundColor: 'black', overflow: 'hidden', fontFamily: 'sans-serif'
         }}>
             {/* The Background Video Layer */}
-            <VideoPlayer muted={toggles.muteVideos} volume={masterVolume} />
+            <VideoPlayer muted={toggles.muteVideos} />
 
             {/* Blurred overlay until user clicks PLAY */}
             {!hasStarted && (
@@ -402,12 +381,6 @@ export default function GamePage() {
                         setHasStarted(true)
                         setIsSidebarOpen(false)
                         resume()
-
-                        audioEngine.initialize().then(() => {
-                            audioEngine.playVoice('intro')
-                            setTimeout(() => audioEngine.playVoice('setup'), 5000)
-                            setTimeout(() => audioEngine.playVoice('rules'), 12000)
-                        })
 
                         triggerVideoPlay?.()
                         addToHistory('Session started', 'system')
@@ -717,24 +690,12 @@ export default function GamePage() {
                             </h4>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                <CustomToggle label="Voice" checked={voiceEnabled} onChange={toggleVoice} />
-                                <CustomToggle label="Moans" checked={moansEnabled} onChange={toggleMoans} />
-                                <CustomToggle label="Metronome" checked={metronomeEnabled} onChange={toggleMetronome} />
+
                                 <CustomToggle label="Mute Videos" checked={toggles.muteVideos} onChange={(v) => setToggles({ ...toggles, muteVideos: v })} />
                                 <CustomToggle label="Beat Meter" checked={toggles.beatMeter} onChange={(v) => setToggles({ ...toggles, beatMeter: v })} />
                             </div>
 
-                            {/* Volume Slider */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem' }}>🔈</span>
-                                <input
-                                    type="range" min="0" max="1" step="0.05"
-                                    value={masterVolume}
-                                    onChange={(e) => setMasterVolume(parseFloat(e.target.value))}
-                                    style={{ width: '100%', height: '4px', cursor: 'pointer', accentColor: 'var(--color-accent-secondary)' }}
-                                />
-                                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem' }}>🔊</span>
-                            </div>
+
 
                             {/* Beat Style Picker */}
                             {toggles.beatMeter && (
@@ -833,7 +794,7 @@ export default function GamePage() {
 
             {/* Beat Meter */}
             {!discreetMode && (
-                <BeatMeter enabled={hasStarted && toggles.beatMeter} metronomeEnabled={metronomeEnabled && hasStarted} style={beatStyle} />
+                <BeatMeter enabled={hasStarted && toggles.beatMeter} metronomeEnabled={false} style={beatStyle} />
             )}
 
         </div>

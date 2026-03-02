@@ -135,12 +135,17 @@ export async function fetchByNiche(
     nicheName: string,
     page = 1,
     count = 20,
-    order?: SearchOrder | ''
+    order?: SearchOrder | '',
+    retryCount = 0
 ): Promise<{ gifs: RedGifsGif[]; pages: number; total: number }> {
     const token = await getToken()
 
-    // Convert niche name to slug: "Girls With Glasses" → "girls-with-glasses"
-    const slug = nicheName.toLowerCase().replace(/\s+/g, '-')
+    // Convert niche name to slug: "joi (Jerk Off Instructions)" → "joi-jerk-off-instructions"
+    const slug = nicheName.toLowerCase()
+        .replace(/[()[\]{}&'"!@#$%^*+=~`|\\/<>,.:;?]/g, '') // strip special chars
+        .replace(/\s+/g, '-')     // spaces → hyphens
+        .replace(/-+/g, '-')      // collapse multiple hyphens
+        .replace(/^-|-$/g, '')    // trim leading/trailing hyphens
 
     const params = new URLSearchParams({
         count: count.toString(),
@@ -163,15 +168,18 @@ export async function fetchByNiche(
             return fetchByNiche(nicheName, page, count, order)
         }
         if (res.status === 429) {
-            console.warn(`[RedGifs] Rate limited (429) on niche "${nicheName}". Retrying after 2s...`)
-            await new Promise(r => setTimeout(r, 2000))
-            // Attempt a more generic search fallback to bypass niche-specific rate limits
-            return searchGifs([nicheName], page, count, order)
+            if (retryCount < 1) {
+                console.warn(`[RedGifs] Rate limited (429) on niche "${nicheName}". Waiting 30s before retry...`)
+                await new Promise(r => setTimeout(r, 30000))
+                return fetchByNiche(nicheName, page, count, order, retryCount + 1)
+            }
+            console.warn(`[RedGifs] Still rate limited on "${nicheName}" after retry. Returning empty.`)
+            return { gifs: [], pages: 0, total: 0 }
         }
-        // If niche not found or moved, fall back to search
+        // If niche not found or moved, return empty (search endpoint doesn't filter with temp tokens)
         if (res.status === 404 || res.status === 301 || res.status === 308 || res.status === 403) {
-            console.warn(`[RedGifs] Niche "${nicheName}" returned ${res.status}, falling back to search`)
-            return searchGifs([nicheName], page, count, order)
+            console.warn(`[RedGifs] Niche "${nicheName}" returned ${res.status}, no matching niche found`)
+            return { gifs: [], pages: 0, total: 0 }
         }
         throw new Error(`RedGifs niche fetch failed: ${res.status}`)
     }
@@ -253,7 +261,7 @@ export async function fetchNiches(): Promise<RedGifsNiche[]> {
         return cachedNiches
     }
 
-    // Parse bundled data, sort by popularity (most gifs first), take top 100
+    // Parse bundled data, sort by popularity (most gifs first)
     const all = (fallbackNichesData as any[]).map((n: any) => ({
         name: n.name || '',
         gifs: n.gifs ?? 0,
@@ -261,8 +269,8 @@ export async function fetchNiches(): Promise<RedGifsNiche[]> {
         thumbnail: n.thumbnail ?? '',
     }))
     all.sort((a, b) => b.gifs - a.gifs)
-    cachedNiches = all.slice(0, 100)
-    console.log(`[RedGifs] Loaded top ${cachedNiches.length} niches by popularity`)
+    cachedNiches = all
+    console.log(`[RedGifs] Loaded ${cachedNiches.length} niches for matching`)
     return cachedNiches
 }
 

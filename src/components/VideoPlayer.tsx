@@ -118,6 +118,11 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
         }
     }, [isPlaying, currentVideo])
 
+    // ── Instantly reset progress bar when video changes ──
+    useEffect(() => {
+        setProgress(0);
+    }, [currentVideo?.id])
+
     // ── Handle video end → advance to next video ──
     const handleEnded = useCallback(() => {
         setTransitioning(true)
@@ -127,6 +132,20 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
 
     const handleEndedRef = useRef(handleEnded)
     handleEndedRef.current = handleEnded
+
+    // ── Handle Progress Bar Click (Seeking) ──
+    const handleProgressClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (!currentVideo) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+        const percentage = x / rect.width;
+
+        const el = document.getElementById(`vid-${currentVideo.id}`) as HTMLVideoElement;
+        if (el && isFinite(el.duration)) {
+            el.currentTime = percentage * el.duration;
+            setProgress(percentage);
+        }
+    }, [currentVideo]);
 
     // ── Handle preload complete ──
     const handleCanPlay = useCallback(
@@ -259,34 +278,41 @@ export default function VideoPlayer({ muted = false, volume = 1.0 }: { muted?: b
                 </div>
             )}
 
-            {/* ── Video Progress Bar ── */}
-            <div style={{
-                position: 'absolute',
-                bottom: 0,
-                left: 0,
-                width: '100%',
-                height: '3px',
-                background: 'rgba(255,255,255,0.1)',
-                zIndex: 50,
-            }}>
-                <div style={{
-                    height: '100%',
-                    width: `${progress * 100}%`,
-                    background: 'linear-gradient(90deg, rgba(139,92,246,0.6), rgba(236,72,153,0.9))',
-                    transition: 'width 0.15s linear',
-                    position: 'relative',
-                }}>
-                    {/* Red dot at the end of progress */}
+            {/* ── Video Progress Bar (Clickable) ── */}
+            <div
+                onClick={handleProgressClick}
+                style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '24px', // Larger hit area for easier clicking/tapping
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    zIndex: 50,
+                    cursor: 'pointer',
+                }}
+            >
+                <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.1)' }}>
                     <div style={{
-                        position: 'absolute',
-                        right: '-4px',
-                        top: '-3px',
-                        width: '8px',
-                        height: '8px',
-                        borderRadius: '50%',
-                        background: '#ef4444',
-                        boxShadow: '0 0 6px rgba(239,68,68,0.8)',
-                    }} />
+                        height: '100%',
+                        width: `${progress * 100}%`,
+                        background: 'linear-gradient(90deg, var(--color-accent), var(--color-accent-secondary))',
+                        transition: progress < 0.01 ? 'none' : 'width 0.1s linear',
+                        position: 'relative',
+                    }}>
+                        {/* Red dot indicator */}
+                        <div style={{
+                            position: 'absolute',
+                            right: '-6px',
+                            top: '-4px',
+                            width: '12px',
+                            height: '12px',
+                            borderRadius: '50%',
+                            background: '#ef4444',
+                            boxShadow: '0 0 8px rgba(239,68,68,0.8)',
+                        }} />
+                    </div>
                 </div>
             </div>
         </div>

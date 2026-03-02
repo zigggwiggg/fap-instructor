@@ -291,17 +291,7 @@ export default function LandingPage() {
                                     type="text"
                                     value={nicheSearch}
                                     onChange={(e) => setNicheSearch(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && nicheSearch.trim()) {
-                                            const tag = nicheSearch.trim().toLowerCase()
-                                            if (!config.tags.includes(tag)) {
-                                                const merged = [...config.tags, tag]
-                                                updateConfig({ tags: merged })
-                                            }
-                                            setNicheSearch('')
-                                        }
-                                    }}
-                                    placeholder="Search or type a custom niche & press Enter..."
+                                    placeholder="Search categories..."
                                     style={{ flex: 1, padding: '6px 10px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'white', fontSize: '0.8rem' }}
                                 />
                                 <button

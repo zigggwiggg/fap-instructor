@@ -2,9 +2,9 @@
 
 import { create } from 'zustand'
 import type { VideoItem } from '../types'
-import { searchGifs, fetchByNiche } from '../services/redgifs'
+import { fetchByNiche, fetchNiches } from '../services/redgifs'
 import { useConfigStore } from './configStore'
-import { shouldUseSD, getPerNicheCount, getConnectionQuality } from '../utils/network'
+import { shouldUseSD, getPerNicheCount } from '../utils/network'
 
 interface VideoStore {
     queue: VideoItem[]
@@ -53,14 +53,14 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
     searchTags: ['nsfw'],
     currentPage: 1,
     hasMore: true,
-    retryDelay: 2000,
+    retryDelay: 30000,
 
     setTags: (tags) => {
         set({ searchTags: tags, queue: [], currentIndex: 0, currentPage: 1, hasMore: true })
     },
 
     fetchMore: async () => {
-        const { isLoading, hasMore, currentPage, queue } = get()
+        const { isLoading, hasMore, currentPage } = get()
         if (isLoading || !hasMore) return
 
         const gameConfig = useConfigStore.getState().config
@@ -72,139 +72,157 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 ? gameConfig.tags
                 : ['amateur girls', 'blowjobs', 'real couples']
 
-            // Pick ONLY ONE random niche from the user's selection per batch.
-            // This guarantees we only make 1 API call per fetch cycle, completely eliminating 429 errors.
-            const tagsToFetch = [...allTags].sort(() => 0.5 - Math.random()).slice(0, 1)
+            // Shuffle all tags for variety
+            const shuffledTags = [...allTags].sort(() => 0.5 - Math.random())
 
-            const newItems: VideoItem[] = []
             const perNiche = getPerNicheCount()
-            const allResults: { gif: import('../services/redgifs').RedGifsGif, searchTag: string }[] = []
 
             // -- IDENTITY: inject orientation niche if needed --
             const { gender, orientation } = gameConfig
-            let fetchTags = [...tagsToFetch]
             if (orientation === 'gay' && gender === 'male') {
-                if (!fetchTags.some(t => t.includes('gay'))) fetchTags.unshift('gay')
+                if (!shuffledTags.some(t => t.includes('gay'))) shuffledTags.unshift('gay')
             } else if (orientation === 'lesbian' && gender === 'female') {
-                if (!fetchTags.some(t => t.includes('lesbian'))) fetchTags.unshift('lesbian')
+                if (!shuffledTags.some(t => t.includes('lesbian'))) shuffledTags.unshift('lesbian')
             }
 
-            // Fetch each tag: try the accurate niche endpoint first, fall back to text search
-            for (let i = 0; i < fetchTags.length; i++) {
-                const tag = fetchTags[i]
-                try {
-                    // 1) Try the accurate niche endpoint first (e.g. /v2/niches/feet/gifs)
-                    let r = await fetchByNiche(tag, currentPage, perNiche)
+            // Build a set of known niche names for quick lookup
+            const knownNiches = await fetchNiches()
+            const knownNicheSet = new Set(knownNiches.map(n => n.name.toLowerCase()))
 
-                    // 2) If niche endpoint returned nothing, fall back to text search
-                    if (!r?.gifs || r.gifs.length === 0) {
-                        console.log(`[VideoStore] Niche "${tag}" returned 0 results, falling back to search`)
-                        r = await searchGifs([tag], currentPage, perNiche)
-                    }
-
-                    if (r?.gifs) {
-                        allResults.push(...r.gifs.map(g => ({ gif: g, searchTag: tag })))
-                    }
-                    // Wait 1 second between API calls to prevent 429 errors
-                    if (i < fetchTags.length - 1) {
-                        await new Promise(resolve => setTimeout(resolve, 1000))
-                    }
-                } catch (err) {
-                    console.warn(`[VideoStore] Fetch "${tag}" failed:`, err)
+            // Helper: find the best matching niche for a custom tag
+            const findMatchingNiche = (customTag: string): string | null => {
+                const tagLower = customTag.toLowerCase()
+                if (knownNicheSet.has(tagLower)) return customTag
+                const matches = knownNiches.filter(n =>
+                    n.name.toLowerCase().includes(tagLower) || tagLower.includes(n.name.toLowerCase())
+                )
+                if (matches.length > 0) {
+                    matches.sort((a, b) => b.gifs - a.gifs)
+                    console.log(`[VideoStore] Custom tag "${customTag}" → matched niche "${matches[0].name}" (${matches[0].gifs} gifs)`)
+                    return matches[0].name
                 }
+                return null
             }
 
-            // Filter for quality, orientation, AND strict tag matching
-            const filtered = allResults.filter(({ gif: g, searchTag }) => {
-                if (g.views && g.views < 100) return false
-                if (g.type === 2) return false  // skip images
-                if (g.duration && g.duration < 4) return false
-
+            // Helper: process results from a single niche fetch and add to queue
+            const processAndEnqueue = (gifs: import('../services/redgifs').RedGifsGif[], searchTag: string, isCustomTag: boolean) => {
                 const useSD = shouldUseSD()
-                if (!useSD && !g.urls.hd) return false
-                if (useSD && !g.urls.sd && !g.urls.hd) return false
+                const items: VideoItem[] = []
 
-                // ── STRICT TAG MATCHING ──
-                // The video must actually contain the user's selected tag in its tags or niches.
-                const tagLower = searchTag.toLowerCase().replace(/[-_]/g, ' ')
-                const videoTags = (g.tags || []).map((t: string) => t.toLowerCase())
-                const videoNiches = (g.niches || []).map((n: string) => n.toLowerCase().replace(/[-_]/g, ' '))
-                const hasMatchingTag = videoTags.some(t => t.includes(tagLower) || tagLower.includes(t))
-                const hasMatchingNiche = videoNiches.some(n => n.includes(tagLower) || tagLower.includes(n))
-                if (!hasMatchingTag && !hasMatchingNiche) {
-                    return false
+                for (const g of gifs) {
+                    if (g.views && g.views < 100) continue
+                    if (g.type === 2) continue
+                    if (g.duration && g.duration < 4) continue
+                    if (!useSD && !g.urls.hd) continue
+                    if (useSD && !g.urls.sd && !g.urls.hd) continue
+
+                    const videoTags = (g.tags || []).map((t: string) => t.toLowerCase())
+
+                    // Tag matching: strict for known niches, relaxed for custom
+                    if (!isCustomTag) {
+                        const tagLower = searchTag.toLowerCase().replace(/[-_]/g, ' ')
+                        const videoNiches = (g.niches || []).map((n: string) => n.toLowerCase().replace(/[-_]/g, ' '))
+                        const hasMatchingTag = videoTags.some(t => t.includes(tagLower) || tagLower.includes(t))
+                        const hasMatchingNiche = videoNiches.some(n => n.includes(tagLower) || tagLower.includes(n))
+                        if (!hasMatchingTag && !hasMatchingNiche) continue
+                    }
+
+                    // Orientation filtering
+                    const gTags = videoTags
+                    const isGay = gTags.includes('gay')
+                    const isTrans = gTags.includes('trans') || gTags.includes('shemale') || gTags.includes('ladyboy')
+                    const isLesbian = gTags.includes('lesbian')
+                    if (orientation === 'straight' && (isGay || isTrans)) continue
+                    if (orientation === 'gay' && gender === 'male' && !isGay && (gTags.includes('pussy') || isLesbian)) continue
+                    if (orientation === 'lesbian' && gender === 'female' && !isLesbian && (isGay || gTags.includes('cock'))) continue
+
+                    const mediaUrl = useSD ? (g.urls.sd || g.urls.hd) : (g.urls.hd || g.urls.sd)
+                    items.push({
+                        id: g.id,
+                        url: proxyMedia(mediaUrl),
+                        thumbnail: g.urls.thumbnail || g.urls.poster,
+                        duration: g.duration,
+                        tags: g.tags || [],
+                        width: g.width,
+                        height: g.height,
+                        loaded: false,
+                        hasAudio: g.hasAudio ?? false,
+                        verified: g.verified ?? false,
+                        views: g.views ?? 0,
+                        likes: g.likes ?? 0,
+                        mediaType: g.type ?? 1,
+                        username: g.userName ?? '',
+                        avgColor: g.avgColor ?? '#000000',
+                        niches: g.niches ?? [],
+                        searchTag,
+                    })
                 }
 
-                // Orientation filtering
-                const gTags = videoTags
-                const isGay = gTags.includes('gay')
-                const isTrans = gTags.includes('trans') || gTags.includes('shemale') || gTags.includes('ladyboy')
-                const isLesbian = gTags.includes('lesbian')
-
-                if (orientation === 'straight') {
-                    if (isGay || isTrans) return false
-                } else if (orientation === 'gay') {
-                    if (gender === 'male' && !isGay) {
-                        if (gTags.includes('pussy') || isLesbian) return false
-                    }
-                } else if (orientation === 'lesbian') {
-                    if (gender === 'female' && !isLesbian) {
-                        if (isGay || gTags.includes('cock')) return false
-                    }
-                }
-
-                return true
-            })
-
-            // Build VideoItems
-            const useSD = shouldUseSD()
-            const quality = getConnectionQuality()
-            if (useSD) console.log(`[VideoStore] Using SD quality (connection: ${quality})`)
-
-            filtered.forEach(({ gif: g, searchTag }) => {
-                const mediaUrl = useSD ? (g.urls.sd || g.urls.hd) : (g.urls.hd || g.urls.sd)
-                newItems.push({
-                    id: g.id,
-                    url: proxyMedia(mediaUrl),
-                    thumbnail: g.urls.thumbnail || g.urls.poster,
-                    duration: g.duration,
-                    tags: g.tags || [],
-                    width: g.width,
-                    height: g.height,
-                    loaded: false,
-                    hasAudio: g.hasAudio ?? false,
-                    verified: g.verified ?? false,
-                    views: g.views ?? 0,
-                    likes: g.likes ?? 0,
-                    mediaType: g.type ?? 1,
-                    username: g.userName ?? '',
-                    avgColor: g.avgColor ?? '#000000',
-                    niches: g.niches ?? [],
-                    searchTag,
+                // Deduplicate against existing queue
+                const currentQueue = [...useVideoStore.getState().queue]
+                const existingIds = new Set(currentQueue.map(v => v.id))
+                const unique = items.filter(v => {
+                    if (existingIds.has(v.id)) return false
+                    existingIds.add(v.id)
+                    return true
                 })
-            })
 
-            // Shuffle
-            for (let i = newItems.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [newItems[i], newItems[j]] = [newItems[j], newItems[i]]
+                if (unique.length > 0) {
+                    // INSERT at random positions among UNWATCHED videos (after currentIndex)
+                    // This interleaves videos from different tags instead of playing one tag continuously
+                    const currentIdx = useVideoStore.getState().currentIndex
+                    const updatedQueue = [...useVideoStore.getState().queue]
+
+                    for (const vid of unique) {
+                        // Random position between currentIndex+1 and end of queue
+                        const insertAfter = currentIdx + 1
+                        const insertPos = insertAfter + Math.floor(Math.random() * (updatedQueue.length - insertAfter + 1))
+                        updatedQueue.splice(insertPos, 0, vid)
+                    }
+
+                    console.log(`[VideoStore] +${unique.length} videos from "${searchTag}" (scattered into queue)`)
+                    set({ queue: updatedQueue })
+                }
+
+                return unique.length
             }
 
-            if (newItems.length === 0) {
+            // Resolve the niche name for each tag
+            const resolvedTags = shuffledTags.map(tag => {
+                const isKnown = knownNicheSet.has(tag.toLowerCase())
+                let actualNiche = tag
+                if (!isKnown) {
+                    const matched = findMatchingNiche(tag)
+                    if (matched) actualNiche = matched
+                    else console.warn(`[VideoStore] No matching niche for "${tag}", trying as slug`)
+                }
+                return { tag, actualNiche, isCustomTag: !isKnown }
+            })
+
+            // ── FETCH FIRST TAG IMMEDIATELY (so user sees videos fast) ──
+            const first = resolvedTags[0]
+            if (first) {
+                try {
+                    const r = await fetchByNiche(first.actualNiche, currentPage, perNiche)
+                    if (r?.gifs) processAndEnqueue(r.gifs, first.tag, first.isCustomTag)
+                } catch (err) {
+                    console.warn(`[VideoStore] Fetch "${first.tag}" failed:`, err)
+                }
+            }
+
+            // If first tag returned nothing, handle retry
+            if (useVideoStore.getState().queue.length === 0 && resolvedTags.length <= 1) {
                 const { retryDelay } = get()
-                // If we've hit max backoff, give up to save rate limits
-                if (retryDelay > 15000) {
+                if (retryDelay > 90000) {
                     set({
                         isLoading: false,
-                        error: 'No videos found or rate limit hit. Please try different niches or wait a few minutes.',
+                        error: 'No videos found. Please try different niches or wait a few minutes.',
                         hasMore: false
                     })
                     return
                 }
-
-                console.warn(`[VideoStore] No items fetched. Will retry in ${retryDelay}ms...`)
+                console.warn(`[VideoStore] No items from first tag. Will retry in ${retryDelay / 1000}s...`)
                 set({ isLoading: false, retryDelay: retryDelay * 2 })
-
                 setTimeout(() => {
                     const s = useVideoStore.getState()
                     if (s.queue.length === 0 && !s.isLoading && s.hasMore) s.fetchMore()
@@ -212,24 +230,24 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 return
             }
 
-            // Success! Reset retry delay
-            set({ retryDelay: 2000 })
+            set({ retryDelay: 30000, isLoading: false, currentPage: currentPage + 1 })
 
-            // Deduplicate
-            const existingIds = new Set(queue.map((v) => v.id))
-            const finalItems = newItems.filter((g) => {
-                if (existingIds.has(g.id)) return false
-                existingIds.add(g.id)
-                return true
+            // ── FETCH REMAINING TAGS IN BACKGROUND (10s apart) ──
+            const remaining = resolvedTags.slice(1)
+            remaining.forEach((entry, idx) => {
+                setTimeout(async () => {
+                    try {
+                        const r = await fetchByNiche(entry.actualNiche, currentPage, perNiche)
+                        if (r?.gifs) processAndEnqueue(r.gifs, entry.tag, entry.isCustomTag)
+                    } catch (err) {
+                        console.warn(`[VideoStore] Background fetch "${entry.tag}" failed:`, err)
+                    }
+                }, (idx + 1) * 10000) // 10 seconds apart
             })
 
-            console.log(`[VideoStore] Fetched ${finalItems.length} videos from niches: [${tagsToFetch.join(', ')}]`)
-
-            set({
-                queue: [...queue, ...finalItems],
-                currentPage: currentPage + 1,
-                isLoading: false,
-            })
+            if (remaining.length > 0) {
+                console.log(`[VideoStore] Scheduled ${remaining.length} more tags, fetching every 10s: [${remaining.map(e => e.tag).join(', ')}]`)
+            }
         } catch (err) {
             set({ error: (err as Error).message, isLoading: false })
         }
@@ -273,7 +291,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             error: null,
             currentPage: 1,
             hasMore: true,
-            retryDelay: 2000,
+            retryDelay: 30000,
         })
     },
 }))
