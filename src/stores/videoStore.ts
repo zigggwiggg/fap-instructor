@@ -107,8 +107,8 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 }
             }
 
-            // Filter for quality, orientation, AND strict tag matching
-            const filtered = allResults.filter(({ gif: g, searchTag }) => {
+            // Filter for quality and orientation
+            const filtered = allResults.filter(({ gif: g }) => {
                 if (g.views && g.views < 100) return false
                 if (g.type === 2) return false  // skip images
                 if (g.duration && g.duration < 4) return false
@@ -117,20 +117,10 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
                 if (!useSD && !g.urls.hd) return false
                 if (useSD && !g.urls.sd && !g.urls.hd) return false
 
-                // ── RELAXED TAG MATCHING ──
-                // The video must actually contain the user's selected tag or a partial match
-                // in its tags or niches because text search can sometimes pull in unrelated garbage.
-                const tagLower = searchTag.toLowerCase().replace(/[-_]/g, ' ')
                 const videoTags = (g.tags || []).map((t: string) => t.toLowerCase())
-                const videoNiches = (g.niches || []).map((n: string) => n.toLowerCase().replace(/[-_]/g, ' '))
-
-                // Allow matches if either the tag is inside the video tags OR video tags are inside the tag
-                const hasMatchingTag = videoTags.some(t => t.includes(tagLower) || tagLower.includes(t))
-                const hasMatchingNiche = videoNiches.some(n => n.includes(tagLower) || tagLower.includes(n))
-
-                if (!hasMatchingTag && !hasMatchingNiche) {
-                    return false
-                }
+                // We rely entirely on the RedGifs search algorithm to provide relevant videos.
+                // Doing strict string matching against client-side tags causes false negatives 
+                // for perfectly valid searches (like "footjob").
 
                 // Orientation filtering
                 const gTags = videoTags
