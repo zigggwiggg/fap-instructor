@@ -105,7 +105,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             }
 
             // Helper: process results from a single niche fetch and add to queue
-            const processAndEnqueue = (gifs: import('../services/redgifs').RedGifsGif[], searchTag: string, isCustomTag: boolean) => {
+            const processAndEnqueue = (gifs: import('../services/redgifs').RedGifsGif[], searchTag: string, _isCustomTag: boolean) => {
                 const useSD = shouldUseSD()
                 const items: VideoItem[] = []
 
