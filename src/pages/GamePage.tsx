@@ -103,6 +103,11 @@ export default function GamePage() {
     const [sessionTime, setSessionTime] = useState(0)
     const [isSidebarOpen, setIsSidebarOpen] = useState(false)
     const [hasStarted, setHasStarted] = useState(false)
+    const [isPreloading, setIsPreloading] = useState(false)
+    const [isPreloadComplete, setIsPreloadComplete] = useState(false)
+    const [preloadProgress, setPreloadProgress] = useState(0)
+    const [preloadStatus, setPreloadStatus] = useState('')
+
     const [beatStyle, setBeatStyle] = useState<BeatStyle>('dot')
     const [discreetMode, setDiscreetMode] = useState(false)
     const [showHotkeys, setShowHotkeys] = useState(false)
@@ -133,6 +138,59 @@ export default function GamePage() {
     const gameTimeRemaining = Math.max(0, Math.floor(durationToUse - sessionTime))
 
     const currentAction = useTaskStore(s => s.currentAction)
+
+    const handlePreload = async () => {
+        if (isPreloading || isPreloadComplete) return;
+        setIsPreloading(true);
+        setPreloadProgress(0);
+        setPreloadStatus('Initializing...');
+
+        const targetSeconds = config.gameDurationMax * 60 * 1.5;
+        let accumulatedSeconds = 0;
+        const preloadedUrls = new Set<string>();
+        let lastFetchTime = 0;
+
+        while (accumulatedSeconds < targetSeconds) {
+            const currentQueue = useVideoStore.getState().queue;
+            const newVids = currentQueue.filter(v => !preloadedUrls.has(v.url));
+
+            for (const v of newVids) {
+                if (accumulatedSeconds >= targetSeconds) break;
+
+                setPreloadStatus(`Loading: #${v.searchTag || 'video'}`);
+                try {
+                    await fetch(v.url, { mode: 'no-cors' });
+                } catch (e) {
+                    console.warn('Preload failed for', v.url);
+                }
+                preloadedUrls.add(v.url);
+                accumulatedSeconds += (v.duration || 10);
+
+                const percent = Math.min(100, Math.floor((accumulatedSeconds / targetSeconds) * 100));
+                setPreloadProgress(percent);
+
+                // Delay between each media fetch to avoid CDN connection overload
+                await new Promise(r => setTimeout(r, 400));
+            }
+
+            if (accumulatedSeconds < targetSeconds) {
+                const now = Date.now();
+                // Check if queue has depleted, but enforce strict 20-second API limit spacing
+                // to completely avoid 429 Rate Limits from RedGifs
+                if (!useVideoStore.getState().isLoading && (now - lastFetchTime > 20000)) {
+                    lastFetchTime = now;
+                    useVideoStore.getState().fetchMore();
+                }
+
+                // Allow background requests time to populate the queue
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+
+        setIsPreloading(false);
+        setIsPreloadComplete(true);
+        setPreloadStatus('Done!');
+    };
 
     // Helper to add to instruction history
     const addToHistory = useCallback((text: string, type: HistoryEntry['type'] = 'notification') => {
@@ -377,61 +435,154 @@ export default function GamePage() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     flexDirection: 'column', gap: '16px'
                 }}>
-                    <button className="btn-glow animate-pulse-glow" onClick={() => {
-                        setHasStarted(true)
-                        setIsSidebarOpen(false)
-                        resume()
+                    {isPreloading || isPreloadComplete ? (
+                        <div style={{ width: '300px', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                            <h3 style={{ color: 'white', marginBottom: '8px' }}>
+                                {isPreloadComplete ? 'Media Cached Successfully ✅' : 'Preloading Media...'}
+                            </h3>
+                            <div style={{ width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden' }}>
+                                <div style={{ width: `${preloadProgress}%`, height: '100%', background: isPreloadComplete ? '#22c55e' : 'var(--color-accent)', transition: 'width 0.3s' }} />
+                            </div>
 
-                        triggerVideoPlay?.()
-                        addToHistory('Session started', 'system')
+                            {!isPreloadComplete ? (
+                                <>
+                                    <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.8rem', marginTop: '4px' }}>{preloadStatus} ({preloadProgress}%)</p>
+                                    <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.7rem', textAlign: 'center', marginTop: '8px' }}>
+                                        This downloads roughly 150% of the maximum game duration in background so you can play without internet interruptions.
+                                    </p>
+                                </>
+                            ) : (
+                                <>
+                                    <p style={{ color: '#4ade80', fontSize: '0.8rem', marginTop: '4px', textAlign: 'center' }}>
+                                        Ready! You can safely turn off your internet/WiFi now.
+                                    </p>
+                                    <button className="btn-glow animate-pulse-glow" onClick={() => {
+                                        setHasStarted(true)
+                                        setIsSidebarOpen(false)
+                                        resume()
 
-                        // GENERATE GAME PLAN
-                        const durationMins = config.gameDurationMin + (Math.random() * (config.gameDurationMax - config.gameDurationMin))
-                        const durationSec = durationMins * 60
-                        const warmUpPhaseEnd = Math.floor(durationSec * 0.1)
-                        const middlePhaseEnd = Math.floor(durationSec * 0.9)
-                        const taperD = Math.floor(durationSec / 3)
+                                        triggerVideoPlay?.()
+                                        addToHistory('Session started', 'system')
 
-                        const numEdges = config.spicyMode ? Math.floor(config.edgesMin + Math.random() * (config.edgesMax - config.edgesMin + 1)) : 0
-                        const numRuins = config.spicyMode ? Math.floor(config.ruinedOrgasmsMin + Math.random() * (config.ruinedOrgasmsMax - config.ruinedOrgasmsMin + 1)) : 0
+                                        // GENERATE GAME PLAN
+                                        const durationMins = config.gameDurationMin + (Math.random() * (config.gameDurationMax - config.gameDurationMin))
+                                        const durationSec = durationMins * 60
+                                        const warmUpPhaseEnd = Math.floor(durationSec * 0.1)
+                                        const middlePhaseEnd = Math.floor(durationSec * 0.9)
+                                        const taperD = Math.floor(durationSec / 3)
 
-                        const events: { type: 'edge' | 'ruin'; time: number }[] = []
-                        for (let i = 0; i < numEdges; i++) {
-                            events.push({ type: 'edge', time: warmUpPhaseEnd + Math.random() * (middlePhaseEnd - warmUpPhaseEnd) })
-                        }
-                        for (let i = 0; i < numRuins; i++) {
-                            events.push({ type: 'ruin', time: warmUpPhaseEnd + Math.random() * (middlePhaseEnd - warmUpPhaseEnd) })
-                        }
-                        events.sort((a, b) => a.time - b.time)
+                                        const numEdges = config.spicyMode ? Math.floor(config.edgesMin + Math.random() * (config.edgesMax - config.edgesMin + 1)) : 0
+                                        const numRuins = config.spicyMode ? Math.floor(config.ruinedOrgasmsMin + Math.random() * (config.ruinedOrgasmsMax - config.ruinedOrgasmsMin + 1)) : 0
 
-                        const rn = Math.random() * 100
-                        const pO = config.spicyMode ? config.finaleOrgasmProb : 100
-                        const pD = config.spicyMode ? config.finaleDeniedProb : 0
-                        let fType: 'orgasm' | 'denied' | 'ruined' = 'orgasm'
-                        if (rn > pO && rn <= pO + pD) fType = 'denied'
-                        else if (rn > pO + pD) fType = 'ruined'
+                                        const events: { type: 'edge' | 'ruin'; time: number }[] = []
+                                        for (let i = 0; i < numEdges; i++) {
+                                            events.push({ type: 'edge', time: warmUpPhaseEnd + Math.random() * (middlePhaseEnd - warmUpPhaseEnd) })
+                                        }
+                                        for (let i = 0; i < numRuins; i++) {
+                                            events.push({ type: 'ruin', time: warmUpPhaseEnd + Math.random() * (middlePhaseEnd - warmUpPhaseEnd) })
+                                        }
+                                        events.sort((a, b) => a.time - b.time)
 
-                        setGamePlan({
-                            durationSeconds: durationSec,
-                            warmUpEnd: warmUpPhaseEnd,
-                            middleEnd: middlePhaseEnd,
-                            taperDuration: taperD,
-                            events,
-                            nextEventIndex: 0,
-                            finaleType: fType,
-                            finaleTriggered: false,
-                            showAnotherGame: false
-                        })
+                                        const rn = Math.random() * 100
+                                        const pO = config.spicyMode ? config.finaleOrgasmProb : 100
+                                        const pD = config.spicyMode ? config.finaleDeniedProb : 0
+                                        let fType: 'orgasm' | 'denied' | 'ruined' = 'orgasm'
+                                        if (rn > pO && rn <= pO + pD) fType = 'denied'
+                                        else if (rn > pO + pD) fType = 'ruined'
 
-                        setStrokeSpeed(config.strokeSpeedMin)
-                        useStrokeStore.getState().setPhase('stroking')
-                    }} style={{ fontSize: '1.25rem', padding: '16px 48px' }}>
-                        ▶ PLAY
-                    </button>
-                    <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem' }}>Click to start the session</p>
-                    <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.65rem', marginTop: '8px' }}>
-                        Press <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.6rem' }}>?</kbd> during game for keyboard shortcuts
-                    </p>
+                                        setGamePlan({
+                                            durationSeconds: durationSec,
+                                            warmUpEnd: warmUpPhaseEnd,
+                                            middleEnd: middlePhaseEnd,
+                                            taperDuration: taperD,
+                                            events,
+                                            nextEventIndex: 0,
+                                            finaleType: fType,
+                                            finaleTriggered: false,
+                                            showAnotherGame: false
+                                        })
+
+                                        setStrokeSpeed(config.strokeSpeedMin)
+                                        useStrokeStore.getState().setPhase('stroking')
+                                    }} style={{ fontSize: '1.25rem', padding: '16px 48px', marginTop: '16px', width: '100%' }}>
+                                        ▶ PLAY RECORDINGS
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    ) : (
+                        <>
+                            <button className="btn-glow animate-pulse-glow" onClick={() => {
+                                setHasStarted(true)
+                                setIsSidebarOpen(false)
+                                resume()
+
+                                triggerVideoPlay?.()
+                                addToHistory('Session started', 'system')
+
+                                // GENERATE GAME PLAN
+                                const durationMins = config.gameDurationMin + (Math.random() * (config.gameDurationMax - config.gameDurationMin))
+                                const durationSec = durationMins * 60
+                                const warmUpPhaseEnd = Math.floor(durationSec * 0.1)
+                                const middlePhaseEnd = Math.floor(durationSec * 0.9)
+                                const taperD = Math.floor(durationSec / 3)
+
+                                const numEdges = config.spicyMode ? Math.floor(config.edgesMin + Math.random() * (config.edgesMax - config.edgesMin + 1)) : 0
+                                const numRuins = config.spicyMode ? Math.floor(config.ruinedOrgasmsMin + Math.random() * (config.ruinedOrgasmsMax - config.ruinedOrgasmsMin + 1)) : 0
+
+                                const events: { type: 'edge' | 'ruin'; time: number }[] = []
+                                for (let i = 0; i < numEdges; i++) {
+                                    events.push({ type: 'edge', time: warmUpPhaseEnd + Math.random() * (middlePhaseEnd - warmUpPhaseEnd) })
+                                }
+                                for (let i = 0; i < numRuins; i++) {
+                                    events.push({ type: 'ruin', time: warmUpPhaseEnd + Math.random() * (middlePhaseEnd - warmUpPhaseEnd) })
+                                }
+                                events.sort((a, b) => a.time - b.time)
+
+                                const rn = Math.random() * 100
+                                const pO = config.spicyMode ? config.finaleOrgasmProb : 100
+                                const pD = config.spicyMode ? config.finaleDeniedProb : 0
+                                let fType: 'orgasm' | 'denied' | 'ruined' = 'orgasm'
+                                if (rn > pO && rn <= pO + pD) fType = 'denied'
+                                else if (rn > pO + pD) fType = 'ruined'
+
+                                setGamePlan({
+                                    durationSeconds: durationSec,
+                                    warmUpEnd: warmUpPhaseEnd,
+                                    middleEnd: middlePhaseEnd,
+                                    taperDuration: taperD,
+                                    events,
+                                    nextEventIndex: 0,
+                                    finaleType: fType,
+                                    finaleTriggered: false,
+                                    showAnotherGame: false
+                                })
+
+                                setStrokeSpeed(config.strokeSpeedMin)
+                                useStrokeStore.getState().setPhase('stroking')
+                            }} style={{ fontSize: '1.25rem', padding: '16px 48px' }}>
+                                ▶ START GAME NOW
+                            </button>
+
+                            <button onClick={handlePreload} style={{
+                                fontSize: '1rem', padding: '12px 32px',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: '1px solid rgba(255,255,255,0.2)',
+                                borderRadius: '8px', color: 'white',
+                                cursor: 'pointer', transition: 'all 0.2s',
+                                marginTop: '8px'
+                            }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)' }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}>
+                                💾 LOAD MEDIA (NO NET)
+                            </button>
+
+                            <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.8rem', marginTop: '4px' }}>Download videos first to play without internet</p>
+                            <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.65rem', marginTop: '8px' }}>
+                                Press <kbd style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.6rem' }}>?</kbd> during game for keyboard shortcuts
+                            </p>
+                        </>
+                    )}
                 </div>
             )}
 
